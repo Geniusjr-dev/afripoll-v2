@@ -43,11 +43,22 @@ export function useStudyData(studyId: string | null): StudyData {
       try {
         // questionnaire: prefer published, else latest
         const { data: qns } = await sb.from("questionnaires")
-          .select("id,name,status,schema,updated_at")
+          .select("*")
           .eq("project_id", studyId)
           .order("updated_at", { ascending: false });
         let questions: Question[] = [];
         let qnName: string | null = null;
+        // DIAGNOSTIC: expose raw questionnaire shape for schema mapping
+        try {
+          if (typeof window !== "undefined") {
+            (window as any).__afripoll_qn = qns;
+            console.log("[AfriPoll] questionnaires for study:", qns);
+            if (qns && qns[0]) {
+              console.log("[AfriPoll] questionnaire columns:", Object.keys(qns[0]));
+              console.log("[AfriPoll] first questionnaire full:", JSON.stringify(qns[0]).slice(0, 1500));
+            }
+          }
+        } catch (e) {}
         const chosen = (qns || []).find((q: any) => q.status === "published") || (qns || [])[0];
         if (chosen) {
           qnName = chosen.name;
@@ -67,6 +78,7 @@ export function useStudyData(studyId: string | null): StudyData {
           sb.from("users").select("id,full_name,role"),
         ]);
         const subs = subsR.data || [], geo = geoR.data || [], users = usersR.data || [];
+        try { if (typeof window !== "undefined" && subs[0]) { console.log("[AfriPoll] sample submission payload:", JSON.stringify(subs[0].payload).slice(0,1200)); } } catch(e){}
         const gidx: Record<string, any> = {}; geo.forEach((g: any) => (gidx[g.id] = g));
         let flags: any[] = [];
         const ids = subs.map((s: any) => s.client_id);
