@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-poppins: 'Poppins', sans-serif;
+  --font-inter: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+body { font-family: var(--font-inter); }
+h1,h2,h3 { font-family: var(--font-poppins); }
+
+@layer base {
+  body { @apply bg-paper text-ink font-body antialiased; }
+  h1, h2, h3 { @apply font-display font-bold tracking-tight; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  .card { @apply relative overflow-hidden bg-surface border border-line rounded-xl2 shadow-card; }
+  .card-accent::before { content: ""; @apply absolute top-0 left-0 right-0 h-[3px] bg-lime; }
+  .btn { @apply inline-flex items-center justify-center gap-2 h-11 px-4 rounded-[10px] text-[15px] font-semibold bg-blue text-white transition hover:bg-blue-deep; }
+  .btn-accent { @apply bg-lime text-[#123016] hover:bg-lime-deep; }
+  .btn-ghost { @apply bg-surface border border-line text-ink hover:border-muted-2; }
+  .kicker { @apply font-mono text-[11px] tracking-[0.14em] uppercase text-lime-deep font-semibold; }
+}
