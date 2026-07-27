@@ -29,9 +29,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen grid place-items-center p-6"
       style={{ background: "radial-gradient(1200px 600px at 20% -10%, #16304f 0%, #0B2647 55%)" }}>
       <div className="w-full max-w-[400px] bg-surface rounded-[18px] p-8 shadow-[0_30px_70px_-30px_rgba(0,0,0,.6)]">
-        <div className="text-center mb-4">
-          <div className="font-display font-extrabold text-2xl text-ink">AfriPoll</div>
-          <div className="mono text-[11px] text-muted-2 tracking-wider">ELECTION INTELLIGENCE</div>
+        <div className="text-center mb-5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/afripoll-logo.png" alt="AfriPoll Analytics" className="w-[62%] max-w-[200px] h-auto mx-auto" />
         </div>
         <label className="block text-[11px] font-semibold text-muted mt-4 mb-1.5">Email</label>
         <input value={email} onChange={(e) => setEmail(e.target.value)} type="email"

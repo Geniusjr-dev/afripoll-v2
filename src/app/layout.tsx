@@ -4,7 +4,7 @@ import Providers from "./providers";
 
 export const metadata: Metadata = {
   title: "AfriPoll Analytics",
-  description: "Election Research and Intelligence Platform",
+  description: "AfriPoll Analytics - Data. Insight. Impact. Election Research and Intelligence Platform.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

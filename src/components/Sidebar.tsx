@@ -7,10 +7,13 @@ import { MODULES, ORG_NAV, MODULE_NAV, bySlug } from "@/lib/modules";
 function Brand() {
   return (
     <div className="flex items-center gap-3 px-5 pt-5 pb-4">
-      <span className="w-[42px] h-[42px] rounded-[11px] bg-white grid place-items-center flex-shrink-0 font-display font-extrabold text-blue">AP</span>
+      <span className="w-[46px] h-[46px] rounded-[11px] bg-white grid place-items-center flex-shrink-0 p-1">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/afripoll-logo.png" alt="AfriPoll Analytics" className="max-w-full max-h-full object-contain" />
+      </span>
       <div>
         <b className="font-display font-extrabold text-[17px] text-white block leading-none">AfriPoll</b>
-        <small className="mono text-[9.5px] text-[#9FB6D2] tracking-wide">Election Intelligence</small>
+        <small className="mono text-[9px] text-[#8DC63F] tracking-wide">Data. Insight. Impact.</small>
       </div>
     </div>
   );
