@@ -62,13 +62,21 @@ export function useStudyData(studyId: string | null): StudyData {
         const chosen = (qns || []).find((q: any) => q.status === "published") || (qns || [])[0];
         if (chosen) {
           qnName = chosen.name;
-          questions = extractQuestions(chosen.schema);
-          // if schema empty, try a versions table
-          if (questions.length === 0) {
-            const { data: vers } = await sb.from("questionnaire_versions")
-              .select("schema,version").eq("questionnaire_id", chosen.id)
-              .order("version", { ascending: false }).limit(1);
-            if (vers && vers[0]) questions = extractQuestions(vers[0].schema);
+          questions = extractQuestions((chosen as any).schema);
+          // questions live in questionnaire_versions, referenced by current_version_id
+          if (questions.length === 0 && (chosen as any).current_version_id) {
+            const { data: ver, error: verr } = await sb.from("questionnaire_versions")
+              .select("*").eq("id", (chosen as any).current_version_id).single();
+            try {
+              if (typeof window !== "undefined") {
+                console.log("[AfriPoll] version error:", verr?.message);
+                console.log("[AfriPoll] version columns:", ver ? Object.keys(ver) : null);
+                console.log("[AfriPoll] version full:", JSON.stringify(ver).slice(0, 1800));
+              }
+            } catch (e) {}
+            if (ver) {
+              questions = extractQuestions((ver as any).schema || (ver as any).questions || (ver as any).structure || (ver as any).definition || ver);
+            }
           }
         }
 
