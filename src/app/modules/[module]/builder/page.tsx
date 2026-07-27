@@ -38,10 +38,15 @@ export default function BuilderPage() {
       if (chosen) {
         setQnId(chosen.id); setQnName(chosen.name || "Questionnaire"); setStatus(chosen.status || "draft");
         let sch: any = (chosen as any).schema;
+        try { if (typeof window !== "undefined") console.log("[Builder] chosen.schema:", typeof sch, JSON.stringify(sch)?.slice(0,300), "current_version_id:", (chosen as any).current_version_id); } catch(e){}
         if ((!sch || !arr(sch).length) && (chosen as any).current_version_id) {
-          const { data: ver } = await sb.from("questionnaire_versions").select("*").eq("id", (chosen as any).current_version_id).single();
-          sch = (ver as any)?.schema || (ver as any)?.questions || ver;
+          const { data: ver, error: ve } = await sb.from("questionnaire_versions").select("*").eq("id", (chosen as any).current_version_id).single();
+          try { if (typeof window !== "undefined") { console.log("[Builder] version error:", ve?.message); console.log("[Builder] version row:", JSON.stringify(ver)?.slice(0,600)); } } catch(e){}
+          let raw = (ver as any)?.schema ?? (ver as any)?.questions ?? ver;
+          if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch(e){} }
+          sch = raw;
         }
+        try { if (typeof window !== "undefined") console.log("[Builder] normalised count:", normalise(sch).length); } catch(e){}
         setQuestions(normalise(sch));
       }
       setLoading(false);
@@ -51,9 +56,12 @@ export default function BuilderPage() {
 
   function arr(schema: any): any[] {
     if (!schema) return [];
+    if (typeof schema === "string") { try { schema = JSON.parse(schema); } catch (e) { return []; } }
     if (Array.isArray(schema)) return schema;
     if (Array.isArray(schema.questions)) return schema.questions;
     if (Array.isArray(schema.fields)) return schema.fields;
+    if (Array.isArray(schema.items)) return schema.items;
+    if (Array.isArray(schema.pages)) return schema.pages.flatMap((p: any) => p.questions || p.fields || []);
     return [];
   }
   function normalise(schema: any): BQuestion[] {
