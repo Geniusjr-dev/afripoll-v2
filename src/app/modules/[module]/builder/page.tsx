@@ -38,15 +38,12 @@ export default function BuilderPage() {
       if (chosen) {
         setQnId(chosen.id); setQnName(chosen.name || "Questionnaire"); setStatus(chosen.status || "draft");
         let sch: any = (chosen as any).schema;
-        try { if (typeof window !== "undefined") console.log("[Builder] chosen.schema:", typeof sch, JSON.stringify(sch)?.slice(0,300), "current_version_id:", (chosen as any).current_version_id); } catch(e){}
         if ((!sch || !arr(sch).length) && (chosen as any).current_version_id) {
-          const { data: ver, error: ve } = await sb.from("questionnaire_versions").select("*").eq("id", (chosen as any).current_version_id).single();
-          try { if (typeof window !== "undefined") { console.log("[Builder] version error:", ve?.message); console.log("[Builder] version row:", JSON.stringify(ver)?.slice(0,600)); } } catch(e){}
-          let raw = (ver as any)?.schema ?? (ver as any)?.questions ?? ver;
+          const { data: ver } = await sb.from("questionnaire_versions").select("*").eq("id", (chosen as any).current_version_id).single();
+          let raw = (ver as any)?.definition ?? (ver as any)?.schema ?? (ver as any)?.questions ?? ver;
           if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch(e){} }
           sch = raw;
         }
-        try { if (typeof window !== "undefined") console.log("[Builder] normalised count:", normalise(sch).length); } catch(e){}
         setQuestions(normalise(sch));
       }
       setLoading(false);
@@ -61,17 +58,21 @@ export default function BuilderPage() {
     if (Array.isArray(schema.questions)) return schema.questions;
     if (Array.isArray(schema.fields)) return schema.fields;
     if (Array.isArray(schema.items)) return schema.items;
+    if (schema.definition && Array.isArray(schema.definition.questions)) return schema.definition.questions;
     if (Array.isArray(schema.pages)) return schema.pages.flatMap((p: any) => p.questions || p.fields || []);
     return [];
   }
   function normalise(schema: any): BQuestion[] {
-    return arr(schema).map((q: any) => ({
-      code: q.code || q.id || q.name,
-      label: q.label || q.title || q.text || "Question",
-      type: q.type || "short_text",
-      required: !!q.required,
-      options: (q.options || q.choices || []).map((o: any) => typeof o === "string" ? { code: o, label: o } : { code: o.code ?? o.value, label: o.label ?? o.text ?? o.value }),
-    })).filter((q: BQuestion) => q.code);
+    return arr(schema)
+      .slice()
+      .sort((a: any, b: any) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
+      .map((q: any) => ({
+        code: q.code || q.id || q.name,
+        label: q.label || q.title || q.text || "Question",
+        type: q.type || "short_text",
+        required: !!q.required,
+        options: (q.options || q.choices || []).map((o: any) => typeof o === "string" ? { code: o, label: o } : { code: o.code ?? o.value, label: o.label ?? o.text ?? o.value }),
+      })).filter((q: BQuestion) => q.code);
   }
 
   const codes = () => questions.map((q) => q.code);
@@ -103,11 +104,17 @@ export default function BuilderPage() {
     try {
       const sb = supabase();
       // recompute stable codes from labels for any Untitled leftovers
-      const schemaQuestions = questions.map((q) => ({
-        code: q.code, label: q.label, type: q.type, required: q.required,
-        options: qtype(q.type)?.hasOptions ? q.options : undefined,
-      }));
-      const schema = { questions: schemaQuestions };
+      const schemaQuestions = questions.map((q, idx) => {
+        const def = qtype(q.type);
+        let config: any = null;
+        if (q.type === "rating") config = { min: 1, max: 5 };
+        return {
+          code: q.code, type: q.type, label: q.label,
+          config, options: def?.hasOptions ? q.options : null,
+          ordinal: idx + 1, required: q.required,
+        };
+      });
+      const definition = { title: qnName, questions: schemaQuestions };
       const newStatus = publish ? "published" : "draft";
 
       let questionnaireId = qnId;
@@ -119,34 +126,20 @@ export default function BuilderPage() {
         setQnId(qn.id);
       }
 
-      // determine next version number (best effort)
+      // next version_number
       let nextVersion = 1;
       try {
-        const { data: existing } = await sb.from("questionnaire_versions").select("version").eq("questionnaire_id", questionnaireId).order("version", { ascending: false }).limit(1);
-        if (existing && existing[0] && typeof (existing[0] as any).version === "number") nextVersion = (existing[0] as any).version + 1;
+        const { data: existing } = await sb.from("questionnaire_versions").select("version_number").eq("questionnaire_id", questionnaireId).order("version_number", { ascending: false }).limit(1);
+        if (existing && existing[0] && typeof (existing[0] as any).version_number === "number") nextVersion = (existing[0] as any).version_number + 1;
       } catch (e) {}
 
-      // write a new version row holding the schema (try common column shapes)
-      let versionId: string | null = null;
-      const attempts: any[] = [
-        { questionnaire_id: questionnaireId, schema, version: nextVersion },
-        { questionnaire_id: questionnaireId, schema },
-        { questionnaire_id: questionnaireId, questions: schema.questions, version: nextVersion },
-      ];
-      let lastErr: any = null;
-      for (const payload of attempts) {
-        const { data: ver, error: verr } = await sb.from("questionnaire_versions").insert(payload).select().single();
-        if (!verr && ver) { versionId = ver.id; break; }
-        lastErr = verr;
-      }
+      // write a new version row using the real schema shape: definition JSONB + version_number
+      const { data: ver, error: verr } = await sb.from("questionnaire_versions")
+        .insert({ questionnaire_id: questionnaireId, version_number: nextVersion, definition })
+        .select().single();
+      if (verr) throw new Error("Could not save the questionnaire version. " + verr.message);
 
-      if (versionId) {
-        await sb.from("questionnaires").update({ name: qnName, status: newStatus, current_version_id: versionId } as any).eq("id", questionnaireId);
-      } else {
-        // last resort: store schema directly on the questionnaire row
-        const { error: upErr } = await sb.from("questionnaires").update({ name: qnName, status: newStatus, schema } as any).eq("id", questionnaireId);
-        if (upErr) throw new Error("Could not save the questionnaire version. " + (lastErr?.message || upErr.message || ""));
-      }
+      await sb.from("questionnaires").update({ name: qnName, status: newStatus, current_version_id: ver.id } as any).eq("id", questionnaireId);
       setStatus(newStatus);
       setMsg(publish ? "Published. The dashboard and collection now use this version." : "Draft saved.");
     } catch (e: any) {
