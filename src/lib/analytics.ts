@@ -112,3 +112,55 @@ export function donutSVG(rows: ChoiceRow[]): string {
 function esc(s: string): string {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// ---- additional chart builders for the Reports module ----
+
+export function pieSVG(rows: ChoiceRow[]): string {
+  const total = rows.reduce((a, b) => a + b.count, 0) || 1;
+  const cx = 90, cy = 90, r = 82;
+  let a0 = -Math.PI / 2, segs = "";
+  rows.forEach((row, i) => {
+    if (row.count === 0) return;
+    const frac = row.count / total, a1 = a0 + frac * 2 * Math.PI;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    const large = frac > 0.5 ? 1 : 0;
+    segs += `<path d="M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${large} 1 ${x1.toFixed(2)},${y1.toFixed(2)} Z" fill="${CHART_COLORS[i % CHART_COLORS.length]}"/>`;
+    a0 = a1;
+  });
+  const legend = rows.map((row, i) => `<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:3px 0;"><span style="width:11px;height:11px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};display:inline-block;"></span><span style="flex:1;">${esc(row.label)}</span><b style="font-family:'IBM Plex Mono',monospace;">${row.pct.toFixed(1)}%</b></div>`).join("");
+  return `<div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap;"><svg width="180" height="180" viewBox="0 0 180 180">${segs}</svg><div style="flex:1;min-width:160px;">${legend}</div></div>`;
+}
+
+export function lineSVG(labels: string[], counts: number[]): string {
+  const W = 640, H = 240, padL = 40, padB = 34, padT = 16;
+  const plotW = W - padL - 12, plotH = H - padB - padT;
+  const n = labels.length || 1, max = Math.max(1, ...counts);
+  const x = (i: number) => padL + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1));
+  const y = (v: number) => padT + plotH - (plotH * v) / max;
+  let pts = counts.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  let dots = counts.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5" fill="#0B4DA2"/>`).join("");
+  let xlabels = labels.map((lb, i) => `<text x="${x(i).toFixed(1)}" y="${H - 14}" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" fill="#132A43">${esc(lb).slice(0, 8)}</text>`).join("");
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/><polyline points="${pts}" fill="none" stroke="#0B4DA2" stroke-width="2.5"/>${dots}${xlabels}</svg>`;
+}
+
+export function histogramSVG(values: number[], bins = 8): string {
+  if (!values.length) return "";
+  const min = Math.min(...values), max = Math.max(...values);
+  const width = (max - min) / bins || 1;
+  const counts = new Array(bins).fill(0);
+  values.forEach((v) => { let b = Math.floor((v - min) / width); if (b >= bins) b = bins - 1; if (b < 0) b = 0; counts[b]++; });
+  const labels = counts.map((_, i) => (min + i * width).toFixed(0));
+  return columnSVG(labels, counts);
+}
+
+export function scatterSVG(pairs: [number, number][], xl = "X", yl = "Y"): string {
+  if (!pairs.length) return "";
+  const W = 460, H = 300, pad = 40;
+  const xs = pairs.map((p) => p[0]), ys = pairs.map((p) => p[1]);
+  const xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys);
+  const sx = (v: number) => pad + ((W - pad - 12) * (v - xmin)) / (xmax - xmin || 1);
+  const sy = (v: number) => (H - pad) - ((H - pad - 12) * (v - ymin)) / (ymax - ymin || 1);
+  const dots = pairs.map(([a, b]) => `<circle cx="${sx(a).toFixed(1)}" cy="${sy(b).toFixed(1)}" r="4" fill="#0B4DA2" opacity="0.6"/>`).join("");
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${pad}" y1="${H - pad}" x2="${W - 12}" y2="${H - pad}" stroke="#E2E8F0"/><line x1="${pad}" y1="12" x2="${pad}" y2="${H - pad}" stroke="#E2E8F0"/>${dots}<text x="${W / 2}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#5A6B7B" font-family="Inter,sans-serif">${esc(xl)}</text></svg>`;
+}
