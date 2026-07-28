@@ -22,7 +22,8 @@ function ts() { return new Date().toISOString().slice(0, 10); }
 function safe(s: string) { return (s || "report").replace(/[^a-z0-9]+/gi, "_").slice(0, 50); }
 
 async function download(blob: Blob, filename: string) {
-  const { saveAs } = await import("file-saver");
+  const mod: any = await import("file-saver");
+  const saveAs = mod.saveAs || mod.default || mod;
   saveAs(blob, filename);
 }
 
