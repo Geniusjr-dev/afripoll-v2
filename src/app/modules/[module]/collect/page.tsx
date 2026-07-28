@@ -19,6 +19,7 @@ export default function CollectPage() {
 
   const [loading, setLoading] = useState(true);
   const [qnName, setQnName] = useState<string | null>(null);
+  const [versionId, setVersionId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<QDef[]>([]);
   const [pageTitles, setPageTitles] = useState<string[]>(["Page 1"]);
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -45,6 +46,7 @@ export default function CollectPage() {
       const chosen = (qns || [])[0];
       if (chosen && (chosen as any).current_version_id) {
         setQnName(chosen.name);
+        setVersionId((chosen as any).current_version_id);
         const { data: ver } = await sb.from("questionnaire_versions").select("*").eq("id", (chosen as any).current_version_id).single();
         const d: any = (ver as any)?.definition || {};
         const qs: QDef[] = Array.isArray(d.questions) ? d.questions : [];
@@ -54,7 +56,7 @@ export default function CollectPage() {
         const seed: Record<string, any> = {};
         qs.forEach((q) => { if (q && (q as any).defaultValue) seed[q.code] = (q as any).defaultValue; });
         setAnswers(seed);
-      } else { setQnName(null); setQuestions([]); }
+      } else { setQnName(null); setVersionId(null); setQuestions([]); }
       // geo pickers
       const { data: geo } = await sb.from("geo_units").select("id,name,level,parent_id").in("level", ["region", "constituency"]).order("name");
       const g = geo || [];
@@ -110,6 +112,7 @@ export default function CollectPage() {
         client_id: clientId, project_id: activeStudyId, enumerator_id: user?.id || null,
         geo_unit_id: geoUnitId || regionId || null, captured_at: new Date().toISOString(),
         status: "accepted", payload: answers, duration_seconds: duration,
+        questionnaire_version_id: versionId,
       };
       if (profile?.organization_id) row.organization_id = profile.organization_id;
       let { error } = await sb.from("submissions").insert(row);
