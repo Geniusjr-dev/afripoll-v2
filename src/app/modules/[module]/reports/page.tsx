@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, notFound } from "next/navigation";
 import { ModuleShell } from "@/components/Shell";
@@ -9,7 +9,7 @@ import { useStudyData } from "@/lib/studyData";
 import { regionOf, constOf } from "@/lib/orgData";
 import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG } from "@/lib/analytics";
 import { correlation } from "@/lib/statistics";
-import { REPORT_TYPES, SECTION_LABELS, SectionKey } from "@/lib/reportConfig";
+import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
 import StudyContextBar from "@/components/StudyContextBar";
 
@@ -22,6 +22,7 @@ export default function ReportsPage() {
   const d = useStudyData(activeStudyId);
 
   const [reportType, setReportType] = useState("executive");
+  const [enabled, setEnabled] = useState<Set<SectionKey>>(new Set(REPORT_TYPES.find((r) => r.key === "executive")!.sections));
   const [chartStyle, setChartStyle] = useState<Record<string, string>>({});
   const [recommendations, setRecommendations] = useState<string[]>([""]);
   const [confidentiality, setConfidentiality] = useState("Internal");
@@ -29,7 +30,9 @@ export default function ReportsPage() {
   const [copied, setCopied] = useState(false);
 
   const rt = REPORT_TYPES.find((r) => r.key === reportType)!;
-  const has = (s: SectionKey) => rt.sections.includes(s);
+  useEffect(() => { setEnabled(new Set(rt.sections)); }, [reportType]);
+  const has = (s: SectionKey) => enabled.has(s);
+  const toggle = (s: SectionKey) => setEnabled((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   const stats = useMemo(() => {
@@ -127,8 +130,19 @@ export default function ReportsPage() {
               <input value={version} onChange={(e) => setVersion(e.target.value)} className="w-full text-[13px] border border-line rounded-[8px] px-2.5 py-2" /></div>
             <div className="flex items-end"><p className="text-[11.5px] text-muted">{rt.blurb}</p></div>
           </div>
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {rt.sections.map((s) => <span key={s} className="mono text-[9.5px] uppercase tracking-wide bg-blue-soft text-blue rounded-full px-2 py-0.5">{SECTION_LABELS[s]}</span>)}
+          <div className="mt-3">
+            <div className="mono text-[9px] uppercase tracking-wide text-muted-2 mb-1.5">Sections (click to include or remove)</div>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_SECTIONS.map((s) => {
+                const on = enabled.has(s);
+                return (
+                  <button key={s} onClick={() => toggle(s)}
+                    className={`mono text-[9.5px] uppercase tracking-wide rounded-full px-2.5 py-1 border transition ${on ? "bg-blue text-white border-blue" : "bg-surface text-muted-2 border-line hover:border-blue"}`}>
+                    {on ? "" : "+ "}{SECTION_LABELS[s]}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

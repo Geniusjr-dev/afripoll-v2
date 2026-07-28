@@ -7,6 +7,9 @@ export interface ReportType { key: string; name: string; blurb: string; sections
 
 const ALL: SectionKey[] = ["cover", "exec", "methodology", "kpi", "charts", "crosstab", "statistics", "geographic", "insights", "recommendations", "appendix"];
 
+// Canonical section order for rendering and the toggle UI.
+export const ALL_SECTIONS: SectionKey[] = ["cover", "exec", "methodology", "kpi", "charts", "crosstab", "statistics", "geographic", "insights", "recommendations", "appendix"];
+
 export const REPORT_TYPES: ReportType[] = [
   { key: "executive", name: "Executive Report", blurb: "Concise, decision-focused. For leadership and donors.",
     sections: ["cover", "exec", "kpi", "charts", "insights", "recommendations"] },
