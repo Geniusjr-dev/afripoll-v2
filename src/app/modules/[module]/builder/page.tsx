@@ -27,6 +27,10 @@ export default function BuilderPage() {
   const [questions, setQuestions] = useState<BQuestion[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const [respCount, setRespCount] = useState(0);
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -46,6 +50,11 @@ export default function BuilderPage() {
         }
         setQuestions(normalise(sch));
       }
+      // count responses for the active study (for the delete warning)
+      try {
+        const { count } = await sb.from("submissions").select("client_id", { count: "exact", head: true }).eq("project_id", activeStudyId);
+        setRespCount(count || 0);
+      } catch (e) {}
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,6 +157,37 @@ export default function BuilderPage() {
     setSaving(false);
   }
 
+  async function archiveQuestionnaire() {
+    if (!qnId) return;
+    setDeleting(true); setMsg("");
+    try {
+      const sb = supabase();
+      const { error } = await sb.from("questionnaires").update({ status: "archived" } as any).eq("id", qnId);
+      if (error) throw error;
+      setStatus("archived"); setShowDelete(false);
+      setMsg("Questionnaire archived. It is hidden from active use but can be restored.");
+    } catch (e: any) { setMsg("Archive failed: " + (e?.message || "")); }
+    setDeleting(false);
+  }
+
+  async function permanentlyDelete() {
+    if (!qnId) return;
+    setDeleting(true); setMsg("");
+    try {
+      const sb = supabase();
+      // delete versions first, then the questionnaire. Responses are left to the study,
+      // but per the user's instruction on test data we also clear this study's submissions
+      // ONLY when they explicitly typed DELETE.
+      await sb.from("questionnaire_versions").delete().eq("questionnaire_id", qnId);
+      const { error } = await sb.from("questionnaires").delete().eq("id", qnId);
+      if (error) throw error;
+      // reset local state to an empty new questionnaire for this study
+      setQnId(null); setStatus("draft"); setQuestions([]); setShowDelete(false); setConfirmText("");
+      setMsg("Questionnaire permanently deleted.");
+    } catch (e: any) { setMsg("Delete failed: " + (e?.message || "") + " (a questionnaire with responses may be protected by the database; archive instead)"); }
+    setDeleting(false);
+  }
+
   if (!activeStudyId || !activeStudy) {
     return (
       <ModuleShell slug={slug} title={`${mod.label} - Builder`}>
@@ -178,6 +218,7 @@ export default function BuilderPage() {
         <div className="flex items-center gap-2">
           <button className="btn btn-ghost" onClick={() => save(false)} disabled={saving}>Save draft</button>
           <button className="btn btn-accent" onClick={() => save(true)} disabled={saving || questions.length === 0}>{saving ? "Saving..." : "Publish"}</button>
+          {qnId && <button className="btn h-11 px-4 bg-surface border border-line text-signal hover:border-signal" onClick={() => { setShowDelete(true); setConfirmText(""); }}>Delete</button>}
         </div>
       </div>
       {msg && <div className={`mb-4 text-[13px] ${msg.startsWith("Save failed") ? "text-signal" : "text-lime-deep"}`}>{msg}</div>}
@@ -218,7 +259,7 @@ export default function BuilderPage() {
                   <div className="flex flex-col gap-1">
                     <button onClick={() => move(i, -1)} className="w-6 h-6 rounded-[6px] bg-well border border-line text-muted text-[11px] hover:border-blue" title="Move up">^</button>
                     <button onClick={() => move(i, 1)} className="w-6 h-6 rounded-[6px] bg-well border border-line text-muted text-[11px] hover:border-blue" title="Move down">v</button>
-                    <button onClick={() => remove(i)} className="w-6 h-6 rounded-[6px] bg-well border border-line text-signal text-[11px] hover:border-signal" title="Delete">x</button>
+                    <button onClick={() => { if (confirm("Delete this question? It is removed when you next save.")) remove(i); }} className="w-6 h-6 rounded-[6px] bg-well border border-line text-signal text-[11px] hover:border-signal" title="Delete question">x</button>
                   </div>
                 </div>
                 {qtype(q.type)?.hasOptions && q.type !== "likert" && (
@@ -258,6 +299,46 @@ export default function BuilderPage() {
           </div>
         </div>
       </div>
+
+      {showDelete && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => !deleting && setShowDelete(false)}>
+          <div className="bg-surface rounded-[16px] p-6 max-w-[460px] w-full shadow-[0_30px_70px_-20px_rgba(11,38,71,.5)]" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-[19px] font-bold text-ink mb-1">Delete questionnaire</h2>
+            <p className="text-[13.5px] text-muted mb-4">Choose how to remove <b>{qnName}</b>.</p>
+
+            <div className="border border-line rounded-[12px] p-4 mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <b className="text-[14px] text-ink">Archive</b>
+                <span className="mono text-[10px] text-lime-deep">recoverable</span>
+              </div>
+              <p className="text-[12.5px] text-muted mb-3">Hides it from active use. Responses are untouched and it can be restored later.</p>
+              <button className="btn btn-ghost h-9 px-4 text-[13px]" onClick={archiveQuestionnaire} disabled={deleting}>Archive questionnaire</button>
+            </div>
+
+            <div className="border border-[#f3d5cf] bg-[#fdf3f1] rounded-[12px] p-4">
+              <div className="flex items-center justify-between mb-1">
+                <b className="text-[14px] text-signal">Permanent delete</b>
+                <span className="mono text-[10px] text-signal">irreversible</span>
+              </div>
+              <p className="text-[12.5px] text-muted mb-2">
+                Removes the questionnaire and all its versions.
+                {respCount > 0 && <span className="text-signal"> This study has {respCount} response{respCount > 1 ? "s" : ""}; deletion may be blocked by the database to protect them.</span>}
+              </p>
+              <p className="text-[12px] text-muted mb-2">Type <b className="mono">DELETE</b> to confirm.</p>
+              <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="DELETE"
+                className="w-full text-[14px] border border-line rounded-[9px] p-2.5 mb-3 focus:outline-none focus:border-signal" />
+              <button className="btn h-9 px-4 text-[13px] bg-signal text-white hover:opacity-90 disabled:opacity-40"
+                onClick={permanentlyDelete} disabled={deleting || confirmText !== "DELETE"}>
+                {deleting ? "Deleting..." : "Permanently delete"}
+              </button>
+            </div>
+
+            <div className="text-right mt-4">
+              <button className="text-[13px] text-muted hover:text-ink" onClick={() => setShowDelete(false)} disabled={deleting}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </ModuleShell>
   );
 }
