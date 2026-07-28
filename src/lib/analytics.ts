@@ -141,17 +141,65 @@ export function lineSVG(labels: string[], counts: number[]): string {
   let pts = counts.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   let dots = counts.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5" fill="#0B4DA2"/>`).join("");
   let xlabels = labels.map((lb, i) => `<text x="${x(i).toFixed(1)}" y="${H - 14}" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" fill="#132A43">${esc(lb).slice(0, 8)}</text>`).join("");
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/><polyline points="${pts}" fill="none" stroke="#0B4DA2" stroke-width="2.5"/>${dots}${xlabels}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/><polyline points="${pts}" fill="none" stroke="#0B4DA2" stroke-width="2.5"/>${dots}${xlabels}</svg>`;
 }
 
-export function histogramSVG(values: number[], bins = 8): string {
+// Proper histogram: continuous data grouped into adjacent bins (bars touch, no gaps).
+// For discrete data with few distinct integer values, it bins by each value so labels stay clean.
+export function histogramSVG(values: number[], bins = 0): string {
   if (!values.length) return "";
   const min = Math.min(...values), max = Math.max(...values);
-  const width = (max - min) / bins || 1;
-  const counts = new Array(bins).fill(0);
-  values.forEach((v) => { let b = Math.floor((v - min) / width); if (b >= bins) b = bins - 1; if (b < 0) b = 0; counts[b]++; });
-  const labels = counts.map((_, i) => (min + i * width).toFixed(0));
-  return columnSVG(labels, counts);
+  const distinct = Array.from(new Set(values)).sort((a, b) => a - b);
+  const allInt = values.every((v) => Number.isInteger(v));
+
+  // Decide binning: if few distinct integer values, one bin per value; else Sturges/sqrt rule.
+  let edges: number[] = [];
+  if (allInt && distinct.length <= 12) {
+    // one bin per integer value across the observed range
+    for (let v = min; v <= max + 1; v++) edges.push(v - 0.5);
+  } else {
+    const k = bins > 0 ? bins : Math.min(20, Math.max(5, Math.ceil(Math.sqrt(values.length))));
+    const w = (max - min) / k || 1;
+    for (let i = 0; i <= k; i++) edges.push(min + i * w);
+  }
+  const nb = edges.length - 1;
+  const counts = new Array(nb).fill(0);
+  values.forEach((v) => { let b = 0; while (b < nb - 1 && v >= edges[b + 1]) b++; counts[b]++; });
+
+  const W = 660, H = 280, padL = 40, padB = 40, padT = 20;
+  const plotW = W - padL - 14, plotH = H - padB - padT;
+  const maxC = Math.max(1, ...counts);
+  const bw = plotW / nb;
+  let bars = "", labels = "", yticks = "";
+  // y gridlines
+  const yStep = niceStep(maxC);
+  for (let yv = 0; yv <= maxC; yv += yStep) {
+    const y = padT + plotH - (plotH * yv) / maxC;
+    yticks += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - 14}" y2="${y.toFixed(1)}" stroke="#EEF2F6"/><text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="#8A99A8" font-family="IBM Plex Mono,monospace">${yv}</text>`;
+  }
+  counts.forEach((c, i) => {
+    const bh = (plotH * c) / maxC;
+    const x = padL + i * bw, y = padT + plotH - bh;
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#0B4DA2" stroke="#ffffff" stroke-width="1"/>`;
+    if (c > 0) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10" fill="#5A6B7B" font-family="IBM Plex Mono,monospace">${c}</text>`;
+  });
+  // x-axis edge labels (unique, at bin boundaries)
+  const showEvery = Math.ceil(edges.length / 10);
+  edges.forEach((e, i) => {
+    if (i % showEvery !== 0 && i !== edges.length - 1) return;
+    const x = padL + i * bw;
+    const lbl = allInt && distinct.length <= 12 ? (e + 0.5).toFixed(0) : e.toFixed(edges[edges.length - 1] - edges[0] > 10 ? 0 : 1);
+    labels += `<text x="${x.toFixed(1)}" y="${H - 22}" text-anchor="middle" font-size="9.5" fill="#132A43" font-family="Inter,sans-serif">${lbl}</text>`;
+  });
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${yticks}<line x1="${padL}" y1="${padT + plotH}" x2="${W - 14}" y2="${padT + plotH}" stroke="#CBD5E1"/>${bars}${labels}</svg>`;
+}
+
+function niceStep(max: number): number {
+  if (max <= 5) return 1;
+  if (max <= 10) return 2;
+  if (max <= 25) return 5;
+  if (max <= 50) return 10;
+  return Math.ceil(max / 5 / 10) * 10;
 }
 
 export function scatterSVG(pairs: [number, number][], xl = "X", yl = "Y"): string {
@@ -162,7 +210,7 @@ export function scatterSVG(pairs: [number, number][], xl = "X", yl = "Y"): strin
   const sx = (v: number) => pad + ((W - pad - 12) * (v - xmin)) / (xmax - xmin || 1);
   const sy = (v: number) => (H - pad) - ((H - pad - 12) * (v - ymin)) / (ymax - ymin || 1);
   const dots = pairs.map(([a, b]) => `<circle cx="${sx(a).toFixed(1)}" cy="${sy(b).toFixed(1)}" r="4" fill="#0B4DA2" opacity="0.6"/>`).join("");
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${pad}" y1="${H - pad}" x2="${W - 12}" y2="${H - pad}" stroke="#E2E8F0"/><line x1="${pad}" y1="12" x2="${pad}" y2="${H - pad}" stroke="#E2E8F0"/>${dots}<text x="${W / 2}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#5A6B7B" font-family="Inter,sans-serif">${esc(xl)}</text></svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><line x1="${pad}" y1="${H - pad}" x2="${W - 12}" y2="${H - pad}" stroke="#E2E8F0"/><line x1="${pad}" y1="12" x2="${pad}" y2="${H - pad}" stroke="#E2E8F0"/>${dots}<text x="${W / 2}" y="${H - 6}" text-anchor="middle" font-size="10" fill="#5A6B7B" font-family="Inter,sans-serif">${esc(xl)}</text></svg>`;
 }
 
 // ================= Additional 2D chart builders (Step 3) =================
@@ -187,7 +235,7 @@ export function groupedBarSVG(groups: string[], series: { name: string; values: 
     labels += `<text x="${(gx + groupW / 2).toFixed(1)}" y="${H - 26}" text-anchor="middle" font-family="Inter,sans-serif" font-size="10.5" fill="#132A43">${esc(g).slice(0, 12)}</text>`;
   });
   const legend = series.map((s, i) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:11.5px;"><span style="width:11px;height:11px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};display:inline-block;"></span>${esc(s.name)}</span>`).join("");
-  return `<div><svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/>${bars}${labels}</svg><div style="margin-top:6px;">${legend}</div></div>`;
+  return `<div><svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/>${bars}${labels}</svg><div style="margin-top:6px;">${legend}</div></div>`;
 }
 
 // Stacked bar: same shape as grouped but stacked per group
@@ -210,7 +258,7 @@ export function stackedBarSVG(groups: string[], series: { name: string; values: 
     labels += `<text x="${(gx + barW / 2).toFixed(1)}" y="${H - 26}" text-anchor="middle" font-family="Inter,sans-serif" font-size="10.5" fill="#132A43">${esc(g).slice(0, 12)}</text>`;
   });
   const legend = series.map((s, i) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:11.5px;"><span style="width:11px;height:11px;border-radius:3px;background:${CHART_COLORS[i % CHART_COLORS.length]};display:inline-block;"></span>${esc(s.name)}</span>`).join("");
-  return `<div><svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/>${bars}${labels}</svg><div style="margin-top:6px;">${legend}</div></div>`;
+  return `<div><svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><line x1="${padL}" y1="${padT + plotH}" x2="${W - 12}" y2="${padT + plotH}" stroke="#E2E8F0"/>${bars}${labels}</svg><div style="margin-top:6px;">${legend}</div></div>`;
 }
 
 // Area chart: like line but filled
@@ -223,7 +271,7 @@ export function areaSVG(labels: string[], counts: number[]): string {
   const line = counts.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const area = `${padL},${padT + plotH} ${line} ${x(n - 1).toFixed(1)},${padT + plotH}`;
   const xlabels = labels.map((lb, i) => `<text x="${x(i).toFixed(1)}" y="${H - 14}" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" fill="#132A43">${esc(lb).slice(0, 8)}</text>`).join("");
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0B4DA2" stop-opacity="0.35"/><stop offset="100%" stop-color="#0B4DA2" stop-opacity="0.03"/></linearGradient></defs><polygon points="${area}" fill="url(#ag)"/><polyline points="${line}" fill="none" stroke="#0B4DA2" stroke-width="2.5"/>${xlabels}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0B4DA2" stop-opacity="0.35"/><stop offset="100%" stop-color="#0B4DA2" stop-opacity="0.03"/></linearGradient></defs><polygon points="${area}" fill="url(#ag)"/><polyline points="${line}" fill="none" stroke="#0B4DA2" stroke-width="2.5"/>${xlabels}</svg>`;
 }
 
 // Bubble chart: pairs with size. data: [{x,y,size,label}]
@@ -235,7 +283,7 @@ export function bubbleSVG(points: { x: number; y: number; size: number; label?: 
   const sx = (v: number) => pad + ((W - pad - 14) * (v - xmin)) / (xmax - xmin || 1);
   const sy = (v: number) => (H - pad) - ((H - pad - 14) * (v - ymin)) / (ymax - ymin || 1);
   const bubbles = points.map((p, i) => { const r = 6 + 26 * Math.sqrt(p.size / smax); return `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="${r.toFixed(1)}" fill="${CHART_COLORS[i % CHART_COLORS.length]}" opacity="0.55"/>`; }).join("");
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}"><line x1="${pad}" y1="${H - pad}" x2="${W - 14}" y2="${H - pad}" stroke="#E2E8F0"/><line x1="${pad}" y1="14" x2="${pad}" y2="${H - pad}" stroke="#E2E8F0"/>${bubbles}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;"><line x1="${pad}" y1="${H - pad}" x2="${W - 14}" y2="${H - pad}" stroke="#E2E8F0"/><line x1="${pad}" y1="14" x2="${pad}" y2="${H - pad}" stroke="#E2E8F0"/>${bubbles}</svg>`;
 }
 
 // Box-and-whisker for numeric values
@@ -247,7 +295,7 @@ export function boxPlotSVG(values: number[]): string {
   const W = 560, H = 150, padL = 30, padR = 20, y = 70, bh = 42;
   const scale = (v: number) => padL + ((W - padL - padR) * (v - min)) / (max - min || 1);
   const bx1 = scale(q1), bx3 = scale(q3), bmed = scale(med), bmin = scale(min), bmax = scale(max);
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">
     <line x1="${bmin}" y1="${y}" x2="${bx1}" y2="${y}" stroke="#5A6B7B"/><line x1="${bx3}" y1="${y}" x2="${bmax}" y2="${y}" stroke="#5A6B7B"/>
     <line x1="${bmin}" y1="${y - 12}" x2="${bmin}" y2="${y + 12}" stroke="#5A6B7B"/><line x1="${bmax}" y1="${y - 12}" x2="${bmax}" y2="${y + 12}" stroke="#5A6B7B"/>
     <rect x="${bx1}" y="${y - bh / 2}" width="${(bx3 - bx1).toFixed(1)}" height="${bh}" rx="4" fill="#0B4DA2" opacity="0.18" stroke="#0B4DA2"/>
@@ -269,7 +317,7 @@ export function radarSVG(axes: string[], values: number[]): string {
   axes.forEach((ax, i) => { const [x, y] = pt(i, 1); spokes += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#E2E8F0"/>`;
     const [lx, ly] = pt(i, 1.16); labels += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="10" fill="#132A43" font-family="Inter,sans-serif">${esc(ax).slice(0, 12)}</text>`; });
   const poly = values.map((v, i) => pt(i, v / max).map((x) => x.toFixed(1)).join(",")).join(" ");
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">${rings}${spokes}<polygon points="${poly}" fill="#0B4DA2" fill-opacity="0.25" stroke="#0B4DA2" stroke-width="2"/>${labels}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${rings}${spokes}<polygon points="${poly}" fill="#0B4DA2" fill-opacity="0.25" stroke="#0B4DA2" stroke-width="2"/>${labels}</svg>`;
 }
 
 // Heat map: matrix of values. data: {rows:[labels], cols:[labels], matrix:[[..]]}
@@ -283,7 +331,7 @@ export function heatMapSVG(rowLabels: string[], colLabels: string[], matrix: num
     cells += `<rect x="${x}" y="${y}" width="${cell - 2}" height="${cell - 2}" rx="4" fill="#0B4DA2" fill-opacity="${(0.08 + intensity * 0.85).toFixed(2)}"/><text x="${x + cell / 2 - 1}" y="${y + cell / 2 + 3}" text-anchor="middle" font-size="10" fill="${intensity > 0.5 ? "#fff" : "#132A43"}" font-family="IBM Plex Mono,monospace">${v}</text>`;
   }); rlab += `<text x="${padL - 8}" y="${padT + ri * cell + cell / 2 + 3}" text-anchor="end" font-size="10.5" fill="#132A43" font-family="Inter,sans-serif">${esc(rowLabels[ri]).slice(0, 14)}</text>`; });
   colLabels.forEach((c, ci) => { clab += `<text x="${padL + ci * cell + cell / 2 - 1}" y="${padT - 10}" text-anchor="middle" font-size="10.5" fill="#132A43" font-family="Inter,sans-serif">${esc(c).slice(0, 10)}</text>`; });
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">${cells}${rlab}${clab}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${cells}${rlab}${clab}</svg>`;
 }
 
 // Treemap: nested rectangles sized by value (simple squarified-ish row layout)
@@ -309,7 +357,7 @@ export function treemapSVG(rows: ChoiceRow[]): string {
     });
     y += rowH;
   }
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">${out}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${out}</svg>`;
 }
 
 // Funnel chart: descending stages
@@ -328,7 +376,7 @@ export function funnelSVG(rows: ChoiceRow[]): string {
     out += `<polygon points="${(cx - wTop / 2).toFixed(1)},${yTop.toFixed(1)} ${(cx + wTop / 2).toFixed(1)},${yTop.toFixed(1)} ${(cx + wBot / 2).toFixed(1)},${yBot.toFixed(1)} ${(cx - wBot / 2).toFixed(1)},${yBot.toFixed(1)}" fill="${c}" opacity="0.9"/>`;
     out += `<text x="${cx}" y="${(yTop + stageH / 2).toFixed(1)}" text-anchor="middle" font-size="12" fill="#fff" font-family="Inter,sans-serif">${esc(row.label).slice(0, 20)} (${row.count})</text>`;
   });
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">${out}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${out}</svg>`;
 }
 
 // Sankey (simple two-column flow). data: {left:[{label,value}], right:[{label,value}], flows:[{from,to,value}]}
@@ -352,5 +400,5 @@ export function sankeySVG(left: { label: string; value: number }[], right: { lab
   let nodes = "", labels = "";
   lNodes.forEach((n, i) => { nodes += `<rect x="0" y="${n.y.toFixed(1)}" width="${colW}" height="${n.h.toFixed(1)}" fill="${CHART_COLORS[i % CHART_COLORS.length]}"/>`; labels += `<text x="${colW + 6}" y="${(n.y + n.h / 2 + 3).toFixed(1)}" font-size="10.5" fill="#132A43" font-family="Inter,sans-serif">${esc(left[i].label).slice(0, 16)}</text>`; });
   rNodes.forEach((n, i) => { nodes += `<rect x="${W - colW}" y="${n.y.toFixed(1)}" width="${colW}" height="${n.h.toFixed(1)}" fill="${CHART_COLORS[i % CHART_COLORS.length]}"/>`; labels += `<text x="${W - colW - 6}" y="${(n.y + n.h / 2 + 3).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#132A43" font-family="Inter,sans-serif">${esc(right[i].label).slice(0, 16)}</text>`; });
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}">${paths}${nodes}${labels}</svg>`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;">${paths}${nodes}${labels}</svg>`;
 }
