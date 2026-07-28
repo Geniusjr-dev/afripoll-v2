@@ -111,7 +111,9 @@ export default function CollectPage() {
         geo_unit_id: geoUnitId || regionId || null, captured_at: new Date().toISOString(),
         status: "accepted", payload: answers, duration_seconds: duration,
       };
-      const { error } = await sb.from("submissions").insert(row);
+      if (profile?.organization_id) row.organization_id = profile.organization_id;
+      let { error } = await sb.from("submissions").insert(row);
+      // if RLS or a missing column rejects it, surface the precise reason
       if (error) throw error;
       setDone(true);
     } catch (e: any) { setMsg("Submit failed: " + (e?.message || "")); }
