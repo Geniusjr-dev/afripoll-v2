@@ -11,7 +11,7 @@ import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG 
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
-import { exportCSV, exportExcel, exportWord, exportPPT, exportPDF, ExportData } from "@/lib/reportExport";
+import type { ExportData } from "@/lib/reportExport";
 import StudyContextBar from "@/components/StudyContextBar";
 
 export default function ReportsPage() {
@@ -120,11 +120,12 @@ export default function ReportsPage() {
     setExporting(kind); setExportOpen(false);
     try {
       const data = buildExportData();
-      if (kind === "csv") await exportCSV(data);
-      else if (kind === "excel") await exportExcel(data);
-      else if (kind === "word") await exportWord(data);
-      else if (kind === "ppt") await exportPPT(data);
-      else if (kind === "pdf") exportPDF();
+      const X = await import("@/lib/reportExport");
+      if (kind === "csv") await X.exportCSV(data);
+      else if (kind === "excel") await X.exportExcel(data);
+      else if (kind === "word") await X.exportWord(data);
+      else if (kind === "ppt") await X.exportPPT(data);
+      else if (kind === "pdf") X.exportPDF();
     } catch (e: any) { alert("Export failed: " + (e?.message || "unknown error")); }
     setExporting("");
   }
