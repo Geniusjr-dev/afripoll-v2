@@ -1,6 +1,6 @@
 "use client";
 // Export engine for AfriPoll reports. Produces CSV, Excel, Word, PowerPoint and PDF.
-import { summarise, Question } from "./analytics";
+import { summarise, Question, hbarSVG, donutSVG } from "./analytics";
 
 export interface ExportData {
   studyName: string;
@@ -25,6 +25,58 @@ async function download(blob: Blob, filename: string) {
   const mod: any = await import("file-saver");
   const saveAs = mod.saveAs || mod.default || mod;
   saveAs(blob, filename);
+}
+
+// ---- image helpers (browser only) ----
+
+// Load the app logo as a data URL (base64). Returns null if unavailable.
+let _logoCache: string | null | undefined;
+async function loadLogo(): Promise<string | null> {
+  if (_logoCache !== undefined) return _logoCache;
+  try {
+    const res = await fetch("/afripoll-logo.png");
+    const blob = await res.blob();
+    _logoCache = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch { _logoCache = null; }
+  return _logoCache;
+}
+
+// Convert an SVG string to a PNG data URL at a given pixel width.
+async function svgToPng(svg: string, width = 640, height = 320): Promise<string | null> {
+  try {
+    // ensure the svg has explicit width/height for rasterising
+    let s = svg;
+    if (!/width=/.test(s.slice(0, 200))) s = s.replace("<svg", `<svg width="${width}" height="${height}"`);
+    const blob = new Blob([s], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    const loaded = new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; });
+    img.src = url;
+    await loaded;
+    const scale = 2; // crisp
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale; canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { URL.revokeObjectURL(url); return null; }
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    return canvas.toDataURL("image/png");
+  } catch { return null; }
+}
+
+// data URL -> Uint8Array (for docx which wants bytes)
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const b64 = dataUrl.split(",")[1] || "";
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
 }
 
 // ---------- CSV ----------
@@ -93,9 +145,16 @@ export async function exportWord(d: ExportData) {
   const docx = await import("docx");
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } = docx;
 
+  const { ImageRun } = docx as any;
   const kids: any[] = [];
   const P = (text: string, opts: any = {}) => new Paragraph({ children: [new TextRun({ text, ...opts })], ...opts.para });
-  // cover
+  // cover - logo first if available
+  const logo = await loadLogo();
+  if (logo) {
+    try {
+      kids.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [ new ImageRun({ type: "png", data: dataUrlToBytes(logo), transformation: { width: 130, height: 130 } }) ] }));
+    } catch (e) {}
+  }
   kids.push(new Paragraph({ text: "AfriPoll Analytics", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }));
   kids.push(new Paragraph({ text: d.moduleName, alignment: AlignmentType.CENTER }));
   kids.push(new Paragraph({ text: d.studyName, heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER }));
@@ -111,18 +170,24 @@ export async function exportWord(d: ExportData) {
 
   // findings tables
   kids.push(new Paragraph({ text: "Findings", heading: HeadingLevel.HEADING_2 }));
-  d.questions.forEach((q, i) => {
+  for (let i = 0; i < d.questions.length; i++) {
+    const q = d.questions[i];
     const s = summarise(q, d.subs);
     kids.push(new Paragraph({ text: `${i + 1}. ${q.label}`, heading: HeadingLevel.HEADING_3 }));
     if (s.kind === "choice" && s.n > 0) {
       const rows = [new TableRow({ children: ["Option", "Count", "%"].map((h) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: h, bold: true })] })] })) })];
       s.rows.forEach((r) => rows.push(new TableRow({ children: [r.label, String(r.count), r.pct.toFixed(1) + "%"].map((c) => new TableCell({ children: [new Paragraph(c)] })) })));
       kids.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+      // chart image where it matters (choice questions)
+      try {
+        const png = await svgToPng(hbarSVG(s.rows), 620, Math.max(120, s.rows.length * 42));
+        if (png) kids.push(new Paragraph({ children: [ new ImageRun({ type: "png", data: dataUrlToBytes(png), transformation: { width: 460, height: Math.max(90, Math.round(s.rows.length * 42 * (460 / 620))) } }) ] }));
+      } catch (e) {}
     } else if (s.kind === "num" && s.n > 0) {
       kids.push(P(`Mean ${s.mean.toFixed(2)}, median ${s.median.toFixed(2)}, std dev ${s.sd.toFixed(2)}, range ${s.min}-${s.max}, n=${s.n}.`));
     } else kids.push(P(`${s.n} response(s).`));
     kids.push(new Paragraph({ text: "" }));
-  });
+  }
 
   // recommendations
   const recs = d.recommendations.filter((r) => r.trim());
@@ -147,10 +212,12 @@ export async function exportPPT(d: ExportData) {
   // cover slide
   let s = pptx.addSlide();
   s.background = { color: NAVY };
-  s.addText("AfriPoll Analytics", { x: 0.5, y: 2.2, w: 12.3, h: 0.6, align: "center", color: LIME, fontSize: 20, bold: true });
-  s.addText(d.studyName, { x: 0.5, y: 3.0, w: 12.3, h: 1.0, align: "center", color: "FFFFFF", fontSize: 40, bold: true });
-  s.addText(d.reportType, { x: 0.5, y: 4.2, w: 12.3, h: 0.5, align: "center", color: "CFE0F4", fontSize: 20 });
-  s.addText(`${d.date}  |  ${d.preparedBy}  |  v${d.version}  |  ${d.confidentiality}`, { x: 0.5, y: 5.2, w: 12.3, h: 0.4, align: "center", color: "9FB6D2", fontSize: 12 });
+  const logo = await loadLogo();
+  if (logo) { try { s.addImage({ data: logo, x: 5.9, y: 0.9, w: 1.5, h: 1.5 }); } catch (e) {} }
+  s.addText("AfriPoll Analytics", { x: 0.5, y: 2.5, w: 12.3, h: 0.6, align: "center", color: LIME, fontSize: 20, bold: true });
+  s.addText(d.studyName, { x: 0.5, y: 3.2, w: 12.3, h: 1.0, align: "center", color: "FFFFFF", fontSize: 40, bold: true });
+  s.addText(d.reportType, { x: 0.5, y: 4.4, w: 12.3, h: 0.5, align: "center", color: "CFE0F4", fontSize: 20 });
+  s.addText(`${d.date}  |  ${d.preparedBy}  |  v${d.version}  |  ${d.confidentiality}`, { x: 0.5, y: 5.4, w: 12.3, h: 0.4, align: "center", color: "9FB6D2", fontSize: 12 });
 
   // exec summary slide
   s = pptx.addSlide();
