@@ -11,6 +11,7 @@ import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG 
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
+import { exportCSV, exportExcel, exportWord, exportPPT, exportPDF, ExportData } from "@/lib/reportExport";
 import StudyContextBar from "@/components/StudyContextBar";
 
 export default function ReportsPage() {
@@ -28,6 +29,8 @@ export default function ReportsPage() {
   const [confidentiality, setConfidentiality] = useState("Internal");
   const [version, setVersion] = useState("1.0");
   const [copied, setCopied] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState("");
 
   const rt = REPORT_TYPES.find((r) => r.key === reportType)!;
   useEffect(() => { setEnabled(new Set(rt.sections)); }, [reportType]);
@@ -104,15 +107,50 @@ export default function ReportsPage() {
   }
   async function copySummary() { try { await navigator.clipboard.writeText(plainSummary()); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} }
 
+  function buildExportData(): ExportData {
+    return {
+      studyName: activeStudy!.name, moduleName: mod!.label, reportType: rt.name,
+      version, confidentiality, preparedBy: profile?.full_name || "AfriPoll", date: today,
+      questions: d.questions, subs: d.subs, stats,
+      insights: autoInsights(), recommendations: recommendations.filter((r) => r.trim()),
+      regionRows: regionCounts(d),
+    };
+  }
+  async function runExport(kind: string) {
+    setExporting(kind); setExportOpen(false);
+    try {
+      const data = buildExportData();
+      if (kind === "csv") await exportCSV(data);
+      else if (kind === "excel") await exportExcel(data);
+      else if (kind === "word") await exportWord(data);
+      else if (kind === "ppt") await exportPPT(data);
+      else if (kind === "pdf") exportPDF();
+    } catch (e: any) { alert("Export failed: " + (e?.message || "unknown error")); }
+    setExporting("");
+  }
+
   return (
     <ModuleShell slug={slug} title={`${mod.label} - Reports`}>
       <div className="no-print">
         <StudyContextBar studies={studies} />
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div><div className="kicker mb-1">Report generator</div><h1 className="text-[24px] font-extrabold text-ink">{activeStudy.name}</h1></div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative">
             <button className="btn btn-ghost" onClick={copySummary}>{copied ? "Copied" : "Copy summary"}</button>
-            <button className="btn btn-accent" onClick={() => window.print()}>Print / Save PDF</button>
+            <button className="btn btn-accent" onClick={() => setExportOpen((o) => !o)} disabled={!!exporting}>{exporting ? "Exporting..." : "Export"} <span className="text-[11px]">v</span></button>
+            {exportOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
+                <div className="absolute top-[48px] right-0 min-w-[220px] bg-surface border border-line rounded-[12px] shadow-[0_20px_50px_-16px_rgba(11,38,71,.35)] p-1.5 z-50">
+                  {[["pdf", "PDF", "Full formatted report"], ["word", "Word (.docx)", "Full formatted report"], ["ppt", "PowerPoint (.pptx)", "Slides with charts"], ["excel", "Excel (.xlsx)", "Data tables + raw responses"], ["csv", "CSV", "Frequencies as text"]].map(([k, label, sub]) => (
+                    <button key={k} onClick={() => runExport(k)} className="block w-full text-left rounded-[8px] px-3 py-2 hover:bg-well">
+                      <b className="block text-[13px] font-semibold text-ink">{label}</b>
+                      <small className="block mono text-[10px] text-muted-2">{sub}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
         {/* report type + meta controls */}
