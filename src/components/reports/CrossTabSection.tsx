@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { Question } from "@/lib/analytics";
 import { crossTab, pStars } from "@/lib/statistics";
+import { groupedBarSVG, stackedBarSVG, heatMapSVG } from "@/lib/analytics";
 
 const CATEGORICAL = ["single_choice", "multiple_choice", "dropdown", "yes_no", "true_false", "likert", "satisfaction", "agreement", "party_selector", "region_selector", "constituency_selector"];
 
@@ -10,6 +11,7 @@ export default function CrossTabSection({ questions, subs }: { questions: Questi
   const [rowCode, setRowCode] = useState(cats[0]?.code || "");
   const [colCode, setColCode] = useState(cats[1]?.code || cats[0]?.code || "");
   const [mode, setMode] = useState<"count" | "colpct" | "rowpct">("colpct");
+  const [chart, setChart] = useState<"none" | "grouped" | "stacked" | "heatmap">("grouped");
 
   const rowQ = cats.find((q) => q.code === rowCode);
   const colQ = cats.find((q) => q.code === colCode);
@@ -60,6 +62,22 @@ export default function CrossTabSection({ questions, subs }: { questions: Questi
           <div className="mt-3 bg-well rounded-[9px] p-3 text-[12px]">
             <b className="text-ink">Chi-square test:</b> <span className="mono">X2({ct.df}) = {ct.chi2.toFixed(2)}</span>, <span className="mono">{pStars(ct.pValue)}</span>, <span className="mono">Cramer's V = {ct.cramersV.toFixed(3)}</span>
             {ct.note && <div className="text-signal text-[11px] mt-1">{ct.note}</div>}
+          </div>
+
+          <div className="mt-4">
+            <div className="no-print flex gap-1.5 mb-2 flex-wrap">
+              <span className="mono text-[9px] uppercase text-muted-2 self-center mr-1">Chart</span>
+              {["grouped", "stacked", "heatmap", "none"].map((o) => (
+                <button key={o} onClick={() => setChart(o as any)} className={`mono text-[10px] uppercase px-2 h-6 rounded border ${chart === o ? "bg-blue text-white border-blue" : "bg-well border-line text-muted"}`}>{o}</button>
+              ))}
+            </div>
+            {chart !== "none" && (
+              <div dangerouslySetInnerHTML={{ __html:
+                chart === "heatmap" ? heatMapSVG(ct.rowLabels, ct.colLabels, ct.counts)
+                : chart === "stacked" ? stackedBarSVG(ct.rowLabels, ct.colLabels.map((cl, ci) => ({ name: cl, values: ct.counts.map((row) => row[ci]) })))
+                : groupedBarSVG(ct.rowLabels, ct.colLabels.map((cl, ci) => ({ name: cl, values: ct.counts.map((row) => row[ci]) })))
+              }} />
+            )}
           </div>
         </>
       ) : <p className="text-muted-2 text-[13px]">Not enough data to cross-tabulate these two questions.</p>}

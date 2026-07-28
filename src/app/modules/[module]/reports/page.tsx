@@ -7,7 +7,7 @@ import { bySlug } from "@/lib/modules";
 import { useWorkspace } from "@/lib/workspace";
 import { useStudyData } from "@/lib/studyData";
 import { regionOf, constOf } from "@/lib/orgData";
-import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG } from "@/lib/analytics";
+import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG, areaSVG, boxPlotSVG, radarSVG, treemapSVG, funnelSVG } from "@/lib/analytics";
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
@@ -274,17 +274,35 @@ export default function ReportsPage() {
                         <div className="mono text-[10.5px] text-muted-2 mb-2">n = {s.n}</div>
                         {s.kind === "choice" && s.n > 0 && (
                           <>
-                            <div className="no-print flex gap-1.5 mb-2">{["bar", "column", "donut", "pie"].map((o) => (
+                            <div className="no-print flex gap-1.5 mb-2 flex-wrap">{["bar", "column", "donut", "pie", "treemap", "funnel", "radar"].map((o) => (
                               <button key={o} onClick={() => setChartStyle((c) => ({ ...c, [q.code]: o }))} className={`mono text-[10px] uppercase px-2 h-6 rounded border ${style === o ? "bg-blue text-white border-blue" : "bg-well border-line text-muted"}`}>{o}</button>
                             ))}</div>
-                            <div dangerouslySetInnerHTML={{ __html: style === "donut" ? donutSVG(s.rows) : style === "pie" ? pieSVG(s.rows) : style === "column" ? columnSVG(s.rows.map((r) => r.label), s.rows.map((r) => r.count)) : hbarSVG(s.rows) }} />
+                            <div dangerouslySetInnerHTML={{ __html:
+                              style === "donut" ? donutSVG(s.rows)
+                              : style === "pie" ? pieSVG(s.rows)
+                              : style === "column" ? columnSVG(s.rows.map((r) => r.label), s.rows.map((r) => r.count))
+                              : style === "treemap" ? treemapSVG(s.rows)
+                              : style === "funnel" ? funnelSVG(s.rows)
+                              : style === "radar" ? radarSVG(s.rows.map((r) => r.label), s.rows.map((r) => r.count))
+                              : hbarSVG(s.rows) }} />
                             <DataTable head={["Option", "Count", "%"]} rows={s.rows.map((r) => [r.label, String(r.count), r.pct.toFixed(1) + "%"])} />
                           </>
                         )}
                         {s.kind === "num" && s.n > 0 && (
                           <>
                             <div className="flex gap-2 flex-wrap mb-2">{[["Mean", s.mean.toFixed(2)], ["Median", s.median.toFixed(2)], ["Mode", s.mode ?? "-"], ["Std dev", s.sd.toFixed(2)], ["Min", s.min], ["Max", s.max]].map(([l, v]) => <span key={l as string} className="bg-well border border-line rounded-[8px] px-2.5 py-1.5 text-[12px]"><b className="mono text-ink">{v}</b> <span className="text-muted-2">{l}</span></span>)}</div>
-                            <div dangerouslySetInnerHTML={{ __html: histogramSVG(d.subs.map((x) => Number(x?.payload?.[q.code])).filter((v) => !isNaN(v))) }} />
+                            <div className="no-print flex gap-1.5 mb-2 flex-wrap">{["histogram", "column", "area", "box"].map((o) => (
+                              <button key={o} onClick={() => setChartStyle((c) => ({ ...c, [q.code]: o }))} className={`mono text-[10px] uppercase px-2 h-6 rounded border ${(chartStyle[q.code] || "histogram") === o ? "bg-blue text-white border-blue" : "bg-well border-line text-muted"}`}>{o}</button>
+                            ))}</div>
+                            <div dangerouslySetInnerHTML={{ __html: (() => {
+                              const vals = d.subs.map((x) => Number(x?.payload?.[q.code])).filter((v) => !isNaN(v));
+                              const ns = chartStyle[q.code] || "histogram";
+                              const dist = Object.keys(s.dist).sort((a, b) => Number(a) - Number(b));
+                              if (ns === "box") return boxPlotSVG(vals);
+                              if (ns === "area") return areaSVG(dist, dist.map((k) => s.dist[k]));
+                              if (ns === "column") return columnSVG(dist, dist.map((k) => s.dist[k]));
+                              return histogramSVG(vals);
+                            })() }} />
                           </>
                         )}
                         {s.kind === "text" && <div className="flex flex-col gap-1.5">{s.samples.map((t, k) => <div key={k} className="bg-well rounded-[8px] px-3 py-2 text-[12.5px]">{t}</div>)}{s.n === 0 && <span className="text-muted-2 text-[13px]">No responses.</span>}</div>}
