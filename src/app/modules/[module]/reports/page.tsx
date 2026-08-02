@@ -30,6 +30,7 @@ export default function ReportsPage() {
   const fsubs = useMemo(() => filterSubs(d.subs, d.gidx, filter), [d.subs, d.gidx, filter]);
   const fd = useMemo(() => ({ ...d, subs: fsubs }), [d, fsubs]);
   const [showAnim, setShowAnim] = useState<Record<string, boolean>>({});
+  const [methodology, setMethodology] = useState({ objectives: "", design: "Cross-sectional structured survey via AfriPoll digital collection", sampling: "", ethics: "", responseRate: "" });
 
   const [reportType, setReportType] = useState("executive");
   const [enabled, setEnabled] = useState<Set<SectionKey>>(new Set(REPORT_TYPES.find((r) => r.key === "executive")!.sections));
@@ -256,14 +257,29 @@ export default function ReportsPage() {
             {has("methodology") && (
               <Section title="Methodology">
                 <table className="w-full text-[13px]"><tbody>
-                  {[["Study objectives", activeStudy.description || "Assess and report on " + activeStudy.name],
-                    ["Module", mod.label], ["Research design", "Structured survey via AfriPoll digital collection"],
+                  {[
+                    ["Study objectives", methodology.objectives, "objectives", "e.g. To assess constituents' perceptions of MP performance and accessibility"],
+                    ["Research design", methodology.design, "design", "e.g. Cross-sectional structured survey"],
+                    ["Sampling technique", methodology.sampling, "sampling", "e.g. Multi-stage random sampling of constituencies"],
+                    ["Ethical considerations", methodology.ethics, "ethics", "e.g. Informed consent obtained; responses anonymised"],
+                  ].map(([k, v, key, ph]) => (
+                    <tr key={k} className="border-b border-line-2">
+                      <td className="py-2 pr-4 font-semibold text-ink w-[220px] align-top">{k}</td>
+                      <td className="py-2 text-muted">
+                        <input value={v as string} onChange={(e) => setMethodology((m) => ({ ...m, [key as string]: e.target.value }))}
+                          placeholder={ph as string} className="w-full bg-transparent border-b border-transparent hover:border-line focus:border-blue focus:outline-none py-0.5 text-muted no-print-border print:border-0" />
+                      </td>
+                    </tr>
+                  ))}
+                  {[["Module", mod.label],
                     ["Sample size", `${stats.n} responses`], ["Coverage", `${stats.regions.length} regions, ${stats.consts.length} constituencies`],
+                    ["Response rate", methodology.responseRate || `${stats.n} completed`],
                     ["Data collection dates", stats.first ? `${stats.first} to ${stats.last}` : "n/a"],
                     ["Enumerators", `${stats.enums}`], ["Data quality checks", `Automated screening; ${stats.dq}% pass rate`],
                     ["Average interview duration", stats.avgDur ? `${Math.floor(stats.avgDur / 60)}m ${stats.avgDur % 60}s` : "n/a"],
                   ].map(([k, v]) => <tr key={k} className="border-b border-line-2"><td className="py-2 pr-4 font-semibold text-ink w-[220px] align-top">{k}</td><td className="py-2 text-muted">{v}</td></tr>)}
                 </tbody></table>
+                <p className="mono text-[10.5px] text-muted-2 mt-2 no-print italic">Click any objective, design, sampling or ethics field to edit. Auto-filled fields update from the data.</p>
               </Section>
             )}
 
