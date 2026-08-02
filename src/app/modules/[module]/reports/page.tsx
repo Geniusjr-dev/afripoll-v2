@@ -11,6 +11,7 @@ import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG,
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
+import StatisticsSection from "@/components/reports/StatisticsSection";
 import { FilterState, emptyFilter, filterSubs, activeFilterCount, filterSummary } from "@/lib/reportFilters";
 import AnimatedChart from "@/components/reports/AnimatedChart";
 import dynamic from "next/dynamic";
@@ -365,15 +366,7 @@ export default function ReportsPage() {
             {/* STATISTICS */}
             {has("statistics") && (
               <Section title="Statistical analysis">
-                <div className="text-[13px] font-bold text-ink mb-2">Descriptive statistics</div>
-                <DataTable head={["Question", "n", "Mean", "Median", "Std dev", "Min", "Max"]}
-                  rows={numQs.map((q) => { const s = summarise(q, fsubs) as any; return [q.label.slice(0, 40), String(s.n), s.mean?.toFixed(2) ?? "-", s.median?.toFixed(2) ?? "-", s.sd?.toFixed(2) ?? "-", String(s.min ?? "-"), String(s.max ?? "-")]; })} />
-                {numQs.length >= 2 && (
-                  <div className="mt-4">
-                    <div className="text-[13px] font-bold text-ink mb-2">Correlations (Pearson r)</div>
-                    <DataTable head={["Pair", "r", "n"]} rows={pairsOf(numQs).map(([a, b]) => { const c = correlation(a.code, b.code, fsubs); return [`${a.label.slice(0, 24)} x ${b.label.slice(0, 24)}`, c.r.toFixed(3), String(c.n)]; })} />
-                  </div>
-                )}
+                <StatisticsSection questions={d.questions} subs={fsubs} />
               </Section>
             )}
 

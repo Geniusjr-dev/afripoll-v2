@@ -109,3 +109,84 @@ export function correlation(aCode: string, bCode: string, subs: any[]): { r: num
   const den = Math.sqrt(da * db);
   return { r: den ? num / den : 0, n };
 }
+
+// ============ Step 5: advanced statistics (t-test, ANOVA, reliability) ============
+
+function mean(a: number[]) { return a.reduce((x, y) => x + y, 0) / (a.length || 1); }
+function variance(a: number[]) { const m = mean(a); return a.reduce((s, x) => s + (x - m) ** 2, 0) / ((a.length - 1) || 1); }
+
+// Student's t distribution two-tailed p-value via incomplete beta
+function betacf(a: number, b: number, x: number): number {
+  const MAXIT = 200, EPS = 3e-12, FPMIN = 1e-300;
+  let qab = a + b, qap = a + 1, qam = a - 1, c = 1, d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN; d = 1 / d; let h = d;
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d; h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d;
+    const del = d * c; h *= del; if (Math.abs(del - 1) < EPS) break;
+  }
+  return h;
+}
+function gammaLn2(z: number): number {
+  const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+  let x = z, y = z, tmp = x + 5.5; tmp -= (x + 0.5) * Math.log(tmp); let ser = 1.000000000190015;
+  for (let j = 0; j < 6; j++) { y++; ser += c[j] / y; }
+  return -tmp + Math.log((2.5066282746310005 * ser) / x);
+}
+function betai(a: number, b: number, x: number): number {
+  if (x <= 0) return 0; if (x >= 1) return 1;
+  const bt = Math.exp(gammaLn2(a + b) - gammaLn2(a) - gammaLn2(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2) ? (bt * betacf(a, b, x)) / a : 1 - (bt * betacf(b, a, 1 - x)) / b;
+}
+function tDistP(t: number, df: number): number { // two-tailed
+  const x = df / (df + t * t);
+  return betai(df / 2, 0.5, x);
+}
+function fDistP(F: number, df1: number, df2: number): number {
+  if (F <= 0) return 1;
+  return betai(df2 / 2, df1 / 2, df2 / (df2 + df1 * F));
+}
+
+export interface TTest { t: number; df: number; p: number; mean1: number; mean2: number; n1: number; n2: number; valid: boolean; }
+// Independent two-sample t-test (Welch's)
+export function tTest(group1: number[], group2: number[]): TTest {
+  const n1 = group1.length, n2 = group2.length;
+  if (n1 < 2 || n2 < 2) return { t: 0, df: 0, p: 1, mean1: mean(group1), mean2: mean(group2), n1, n2, valid: false };
+  const m1 = mean(group1), m2 = mean(group2), v1 = variance(group1), v2 = variance(group2);
+  const se = Math.sqrt(v1 / n1 + v2 / n2);
+  const t = se === 0 ? 0 : (m1 - m2) / se;
+  const df = se === 0 ? 1 : (v1 / n1 + v2 / n2) ** 2 / ((v1 / n1) ** 2 / (n1 - 1) + (v2 / n2) ** 2 / (n2 - 1));
+  return { t, df, p: tDistP(Math.abs(t), df), mean1: m1, mean2: m2, n1, n2, valid: true };
+}
+
+export interface Anova { F: number; df1: number; df2: number; p: number; groups: { label: string; n: number; mean: number }[]; valid: boolean; }
+// One-way ANOVA across groups
+export function anova(groups: { label: string; values: number[] }[]): Anova {
+  const valid = groups.filter((g) => g.values.length >= 2);
+  if (valid.length < 2) return { F: 0, df1: 0, df2: 0, p: 1, groups: groups.map((g) => ({ label: g.label, n: g.values.length, mean: mean(g.values) })), valid: false };
+  const all = valid.flatMap((g) => g.values); const grand = mean(all);
+  let ssb = 0, ssw = 0;
+  valid.forEach((g) => { const m = mean(g.values); ssb += g.values.length * (m - grand) ** 2; g.values.forEach((v) => (ssw += (v - m) ** 2)); });
+  const df1 = valid.length - 1, df2 = all.length - valid.length;
+  const msb = ssb / df1, msw = ssw / (df2 || 1);
+  const F = msw === 0 ? 0 : msb / msw;
+  return { F, df1, df2, p: fDistP(F, df1, df2), groups: valid.map((g) => ({ label: g.label, n: g.values.length, mean: mean(g.values) })), valid: true };
+}
+
+// Cronbach's alpha (reliability) across a set of numeric items (questions)
+export function cronbachAlpha(itemVectors: number[][]): { alpha: number; k: number; valid: boolean } {
+  const k = itemVectors.length;
+  if (k < 2) return { alpha: 0, k, valid: false };
+  const n = Math.min(...itemVectors.map((v) => v.length));
+  if (n < 2) return { alpha: 0, k, valid: false };
+  const items = itemVectors.map((v) => v.slice(0, n));
+  const itemVars = items.map((v) => variance(v));
+  const totals = Array.from({ length: n }, (_, i) => items.reduce((s, v) => s + v[i], 0));
+  const totalVar = variance(totals);
+  if (totalVar === 0) return { alpha: 0, k, valid: false };
+  const alpha = (k / (k - 1)) * (1 - itemVars.reduce((a, b) => a + b, 0) / totalVar);
+  return { alpha, k, valid: true };
+}
