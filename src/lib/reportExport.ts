@@ -1,6 +1,7 @@
 "use client";
 // Export engine for AfriPoll reports. Produces CSV, Excel, Word, PowerPoint and PDF.
 import { summarise, Question, hbarSVG, donutSVG } from "./analytics";
+import { questionNarrative, executiveNarrative } from "./narrative";
 
 export interface ExportData {
   studyName: string;
@@ -162,9 +163,10 @@ export async function exportWord(d: ExportData) {
   kids.push(P(`Date: ${d.date}   |   Prepared by: ${d.preparedBy}   |   Version: ${d.version}   |   ${d.confidentiality}`, { para: { alignment: AlignmentType.CENTER } }));
   kids.push(new Paragraph({ text: "" }));
 
-  // executive summary
+  // executive summary (generated prose)
   kids.push(new Paragraph({ text: "Executive Summary", heading: HeadingLevel.HEADING_2 }));
-  kids.push(P(`This report summarises ${d.stats.n} responses for ${d.studyName}${d.stats.first ? ` collected between ${d.stats.first} and ${d.stats.last}` : ""}${d.stats.regions.length ? `, covering ${d.stats.regions.join(", ")}` : ""}. The screening pass rate was ${d.stats.dq}%${d.stats.flagged ? `, with ${d.stats.flagged} flagged for review.` : "."}`));
+  const execText = executiveNarrative({ studyName: d.studyName, moduleName: d.moduleName, n: d.stats.n, regions: d.stats.regions, consts: d.stats.consts.length, first: d.stats.first, last: d.stats.last, dq: d.stats.dq, flagged: d.stats.flagged, questions: d.questions, subs: d.subs });
+  execText.split("\n\n").forEach((para) => kids.push(P(para)));
   kids.push(new Paragraph({ text: "Key findings", heading: HeadingLevel.HEADING_3 }));
   d.insights.forEach((i) => kids.push(new Paragraph({ text: i, bullet: { level: 0 } })));
 
@@ -174,6 +176,7 @@ export async function exportWord(d: ExportData) {
     const q = d.questions[i];
     const s = summarise(q, d.subs);
     kids.push(new Paragraph({ text: `${i + 1}. ${q.label}`, heading: HeadingLevel.HEADING_3 }));
+    kids.push(P(questionNarrative(q, d.subs)));
     if (s.kind === "choice" && s.n > 0) {
       const rows = [new TableRow({ children: ["Option", "Count", "%"].map((h) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: h, bold: true })] })] })) })];
       s.rows.forEach((r) => rows.push(new TableRow({ children: [r.label, String(r.count), r.pct.toFixed(1) + "%"].map((c) => new TableCell({ children: [new Paragraph(c)] })) })));

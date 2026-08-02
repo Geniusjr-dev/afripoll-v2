@@ -12,6 +12,7 @@ import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
 import StatisticsSection from "@/components/reports/StatisticsSection";
+import { questionNarrative, executiveNarrative, keyFindings as genKeyFindings, comparisonNarrative, interpretation as genInterpretation } from "@/lib/narrative";
 import { FilterState, emptyFilter, filterSubs, activeFilterCount, filterSummary } from "@/lib/reportFilters";
 import AnimatedChart from "@/components/reports/AnimatedChart";
 import dynamic from "next/dynamic";
@@ -234,21 +235,20 @@ export default function ReportsPage() {
             {/* EXEC SUMMARY */}
             {has("exec") && (
               <Section title="Executive summary">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                {activeFilterCount(filter) > 0 && (
+                  <p className="text-[12px] text-blue mb-3 mono no-print">Filtered view: {filterSummary(filter, (code, val) => { const q = d.questions.find((x: any) => x.code === code); const o = q?.options?.find((oo: any) => oo.code === val); return o?.label || val; })}</p>
+                )}
+                <Prose text={executiveNarrative({ studyName: activeStudy.name, moduleName: mod.label, n: stats.n, regions: stats.regions, consts: stats.consts.length, first: stats.first, last: stats.last, dq: stats.dq, flagged: stats.flagged, questions: d.questions, subs: fsubs })} />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 my-5">
                   <Kpi k="Responses" v={stats.n} /><Kpi k="Regions" v={stats.regions.length} /><Kpi k="Constituencies" v={stats.consts.length} /><Kpi k="Data quality" v={`${stats.dq}%`} />
                 </div>
-                <p className="text-[13.5px] text-ink leading-relaxed">
-                  This report summarises {stats.n} response{stats.n === 1 ? "" : "s"} for {activeStudy.name}
-                  {stats.first ? ` collected between ${stats.first} and ${stats.last}` : ""}
-                  {stats.regions.length ? `, covering ${stats.regions.slice(0, 4).join(", ")}${stats.regions.length > 4 ? " and others" : ""}` : ""}.
-                  The screening pass rate was {stats.dq}%{stats.flagged ? `, with ${stats.flagged} flagged for review` : ", with no flags"}.
-                </p>
-                {activeFilterCount(filter) > 0 && (
-                  <p className="text-[12px] text-blue mt-2 mono">Filtered view: {filterSummary(filter, (code, val) => { const q = d.questions.find((x: any) => x.code === code); const o = q?.options?.find((oo: any) => oo.code === val); return o?.label || val; })}</p>
-                )}
                 <div className="mt-3">
-                  <div className="text-[13px] font-bold text-ink mb-1">Key findings</div>
-                  <ul className="list-disc pl-5 text-[13px] text-ink leading-relaxed">{autoInsights().slice(0, 4).map((t, i) => <li key={i}>{t}</li>)}</ul>
+                  <h3 className="text-[14px] font-bold text-ink mb-2">Key findings</h3>
+                  <ul className="flex flex-col gap-1.5 text-[13.5px] text-ink leading-relaxed">
+                    {genKeyFindings(d.questions, fsubs, regionCounts(fd)).map((t, i) => (
+                      <li key={i} className="flex gap-2.5"><span className="text-lime-deep font-bold flex-shrink-0">&bull;</span><span>{t}</span></li>
+                    ))}
+                  </ul>
                 </div>
               </Section>
             )}
@@ -306,6 +306,8 @@ export default function ReportsPage() {
                       <div key={q.code} className="break-inside-avoid">
                         <h3 className="text-[15px] font-bold text-ink mb-1">{i + 1}. {q.label}</h3>
                         <div className="mono text-[10.5px] text-muted-2 mb-2">n = {s.n}</div>
+                        <Prose text={questionNarrative(q, fsubs)} small />
+                        <div className="mt-3" />
                         {s.kind === "choice" && s.n > 0 && (
                           <>
                             <div className="no-print flex gap-1.5 mb-2 flex-wrap">{["bar", "column", "donut", "pie", "treemap", "funnel", "radar"].map((o) => (
@@ -396,9 +398,20 @@ export default function ReportsPage() {
 
             {/* AI INSIGHTS (rule-based now; AI wired later) */}
             {has("insights") && (
-              <Section title="Insights">
-                <ul className="list-disc pl-5 text-[13.5px] text-ink leading-relaxed flex flex-col gap-1.5">{autoInsights().map((t, i) => <li key={i}>{t}</li>)}</ul>
-                <p className="text-[11.5px] text-muted-2 mt-3 no-print">These are generated from the data. AI-written narrative insights are added when the AI service is connected.</p>
+              <Section title="Interpretation and discussion">
+                {(() => {
+                  const numQs = d.questions.filter((q: any) => ["rating", "number", "star_rating", "slider"].includes(q.type));
+                  const catQs = d.questions.filter((q: any) => ["single_choice", "yes_no", "true_false", "dropdown", "party_selector"].includes(q.type));
+                  const comparisons: string[] = [];
+                  numQs.forEach((nq: any) => catQs.forEach((cq: any) => { const c = comparisonNarrative(nq, cq, fsubs); if (c) comparisons.push(c); }));
+                  return (
+                    <>
+                      {comparisons.slice(0, 3).map((c, i) => <Prose key={i} text={c} />)}
+                      <Prose text={genInterpretation(d.questions, fsubs, stats.regions)} />
+                    </>
+                  );
+                })()}
+                <p className="text-[11.5px] text-muted-2 mt-3 no-print italic">This interpretation is generated from the data using rule-based analysis. Richer AI-authored discussion can be enabled when the AI service is connected.</p>
               </Section>
             )}
 
@@ -456,7 +469,17 @@ export default function ReportsPage() {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="mb-8 break-inside-avoid"><h2 className="text-[18px] font-bold text-ink mb-3 pb-1.5 border-b border-line">{title}</h2>{children}</section>;
+  return <section className="mb-9 break-inside-avoid"><h2 className="text-[19px] font-bold text-ink mb-4 pb-2 border-b-2 border-ink">{title}</h2>{children}</section>;
+}
+
+// Narrative prose: renders generated paragraphs in a readable, publication-style column.
+function Prose({ text, small }: { text: string; small?: boolean }) {
+  const paras = text.split("\n\n").filter(Boolean);
+  return (
+    <div className={`flex flex-col gap-3 ${small ? "text-[13px]" : "text-[13.5px]"} text-ink`} style={{ lineHeight: 1.75, textAlign: "justify" }}>
+      {paras.map((p, i) => <p key={i}>{p}</p>)}
+    </div>
+  );
 }
 function Kpi({ k, v }: { k: string; v: string | number }) {
   return <div className="bg-well border border-line rounded-[10px] p-3"><div className="mono text-[9px] uppercase tracking-wide text-muted-2">{k}</div><div className="font-display text-[22px] font-extrabold text-ink mt-0.5">{v}</div></div>;
