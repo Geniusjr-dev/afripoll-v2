@@ -11,6 +11,8 @@ import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG,
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
+import { FilterState, emptyFilter, filterSubs, activeFilterCount, filterSummary } from "@/lib/reportFilters";
+import AnimatedChart from "@/components/reports/AnimatedChart";
 import dynamic from "next/dynamic";
 const Chart3D = dynamic(() => import("@/components/reports/Chart3D"), { ssr: false, loading: () => <div className="text-muted-2 text-[12px] p-4">Loading 3D...</div> });
 import type { ExportData } from "@/lib/reportExport";
@@ -23,6 +25,10 @@ export default function ReportsPage() {
   const studies = mod ? projects.filter((p) => p.project_type === mod.type) : [];
   const activeStudy = studies.find((s) => s.id === activeStudyId) || null;
   const d = useStudyData(activeStudyId);
+  const [filter, setFilter] = useState<FilterState>(emptyFilter());
+  const fsubs = useMemo(() => filterSubs(d.subs, d.gidx, filter), [d.subs, d.gidx, filter]);
+  const fd = useMemo(() => ({ ...d, subs: fsubs }), [d, fsubs]);
+  const [showAnim, setShowAnim] = useState<Record<string, boolean>>({});
 
   const [reportType, setReportType] = useState("executive");
   const [enabled, setEnabled] = useState<Set<SectionKey>>(new Set(REPORT_TYPES.find((r) => r.key === "executive")!.sections));
@@ -42,7 +48,7 @@ export default function ReportsPage() {
   const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   const stats = useMemo(() => {
-    const subs = d.subs;
+    const subs = fsubs;
     const regions = [...new Set(subs.map((s) => regionOf(d.gidx, s.geo_unit_id)).filter(Boolean))] as string[];
     const consts = [...new Set(subs.map((s) => constOf(d.gidx, s.geo_unit_id)).filter(Boolean))] as string[];
     const idset = new Set(subs.map((s) => s.client_id));
@@ -54,7 +60,7 @@ export default function ReportsPage() {
     const avgDur = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
     const gps = subs.filter((s) => s.gps_accuracy_m != null).length;
     return { n: subs.length, regions, consts, flagged, dq, first: dates[0], last: dates[dates.length - 1], enums: enums.size, avgDur, gpsRate: subs.length ? Math.round((100 * gps) / subs.length) : 0 };
-  }, [d]);
+  }, [fsubs, d.gidx, d.flags]);
 
   if (!mod) return notFound();
   if (!activeStudyId || !activeStudy) {
@@ -75,7 +81,7 @@ export default function ReportsPage() {
   function autoInsights(): string[] {
     const out: string[] = [];
     d.questions.forEach((q) => {
-      const s = summarise(q, d.subs);
+      const s = summarise(q, fsubs);
       if (s.kind === "choice" && s.n >= 3) {
         const top = [...s.rows].sort((a, b) => b.count - a.count)[0];
         if (top && top.pct >= 50) out.push(`On "${q.label}", a majority (${top.pct.toFixed(1)}%) selected "${top.label}".`);
@@ -86,7 +92,7 @@ export default function ReportsPage() {
       }
     });
     if (numQs.length >= 2) {
-      const c = correlation(numQs[0].code, numQs[1].code, d.subs);
+      const c = correlation(numQs[0].code, numQs[1].code, fsubs);
       if (c.n >= 4 && Math.abs(c.r) >= 0.3) out.push(`There is a ${c.r > 0 ? "positive" : "negative"} correlation (r = ${c.r.toFixed(2)}) between "${numQs[0].label}" and "${numQs[1].label}".`);
     }
     if (stats.regions.length >= 2) out.push(`Responses span ${stats.regions.length} regions, led by ${stats.regions[0]}.`);
@@ -99,7 +105,7 @@ export default function ReportsPage() {
     L.push(`Responses: ${stats.n} | Regions: ${stats.regions.length} | Constituencies: ${stats.consts.length} | Data quality: ${stats.dq}%`); L.push("");
     L.push("KEY INSIGHTS"); autoInsights().forEach((i) => L.push("- " + i)); L.push("");
     d.questions.forEach((q, i) => {
-      const s = summarise(q, d.subs); L.push(`${i + 1}. ${q.label}`);
+      const s = summarise(q, fsubs); L.push(`${i + 1}. ${q.label}`);
       if (s.kind === "choice") s.rows.forEach((r) => L.push(`   ${r.label}: ${r.count} (${r.pct.toFixed(1)}%)`));
       else if (s.kind === "num") L.push(`   mean ${s.mean.toFixed(2)}, median ${s.median.toFixed(2)}, n=${s.n}`);
       L.push("");
@@ -114,9 +120,9 @@ export default function ReportsPage() {
     return {
       studyName: activeStudy!.name, moduleName: mod!.label, reportType: rt.name,
       version, confidentiality, preparedBy: profile?.full_name || "AfriPoll", date: today,
-      questions: d.questions, subs: d.subs, stats,
+      questions: d.questions, subs: fsubs, stats,
       insights: autoInsights(), recommendations: recommendations.filter((r) => r.trim()),
-      regionRows: regionCounts(d),
+      regionRows: regionCounts(fd),
     };
   }
   async function runExport(kind: string) {
@@ -189,6 +195,11 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {/* ===== FILTER BAR ===== */}
+      {!d.loading && d.questions.length > 0 && (
+        <FilterBar d={d} filter={filter} setFilter={setFilter} filteredN={fsubs.length} totalN={d.subs.length} />
+      )}
+
       {/* ===== REPORT DOCUMENT ===== */}
       <div className="report-doc bg-surface border border-line rounded-xl2 shadow-card max-w-[900px] mx-auto">
         {d.loading ? (
@@ -230,6 +241,9 @@ export default function ReportsPage() {
                   {stats.regions.length ? `, covering ${stats.regions.slice(0, 4).join(", ")}${stats.regions.length > 4 ? " and others" : ""}` : ""}.
                   The screening pass rate was {stats.dq}%{stats.flagged ? `, with ${stats.flagged} flagged for review` : ", with no flags"}.
                 </p>
+                {activeFilterCount(filter) > 0 && (
+                  <p className="text-[12px] text-blue mt-2 mono">Filtered view: {filterSummary(filter, (code, val) => { const q = d.questions.find((x: any) => x.code === code); const o = q?.options?.find((oo: any) => oo.code === val); return o?.label || val; })}</p>
+                )}
                 <div className="mt-3">
                   <div className="text-[13px] font-bold text-ink mb-1">Key findings</div>
                   <ul className="list-disc pl-5 text-[13px] text-ink leading-relaxed">{autoInsights().slice(0, 4).map((t, i) => <li key={i}>{t}</li>)}</ul>
@@ -269,7 +283,7 @@ export default function ReportsPage() {
               <Section title="Findings">
                 <div className="flex flex-col gap-7">
                   {d.questions.map((q, i) => {
-                    const s = summarise(q, d.subs);
+                    const s = summarise(q, fsubs);
                     const style = chartStyle[q.code] || (s.kind === "choice" ? "bar" : "column");
                     return (
                       <div key={q.code} className="break-inside-avoid">
@@ -297,6 +311,16 @@ export default function ReportsPage() {
                             </div>
                             {show3D[q.code] === "column" && <div className="mt-2 no-print"><Chart3D kind="column" title={q.label} data={{ labels: s.rows.map((r) => r.label), values: s.rows.map((r) => r.count) }} /></div>}
                             {show3D[q.code] === "pie" && <div className="mt-2 no-print"><Chart3D kind="pie" title={q.label} data={{ labels: s.rows.map((r) => r.label), values: s.rows.map((r) => r.count) }} /></div>}
+                            <div className="no-print mt-2 flex items-center gap-1.5 flex-wrap">
+                              <span className="mono text-[9px] uppercase text-muted-2">Drill:</span>
+                              {s.rows.map((r) => (
+                                <button key={r.label} onClick={() => setFilter((prev) => ({ ...prev, drill: { code: q.code, value: (q.options?.find((o: any) => o.label === r.label)?.code) || r.label } }))}
+                                  className="mono text-[10px] px-2 h-6 rounded border bg-well border-line text-muted hover:border-blue hover:text-blue">{r.label}</button>
+                              ))}
+                              <button onClick={() => setShowAnim((c) => ({ ...c, [q.code]: !c[q.code] }))}
+                                className={`mono text-[10px] uppercase px-2 h-6 rounded border ml-2 ${showAnim[q.code] ? "bg-lime text-ink border-lime" : "bg-well border-line text-muted"}`}>4D time-lapse</button>
+                            </div>
+                            {showAnim[q.code] && <div className="mt-2 no-print"><AnimatedChart q={q} subs={fsubs} /></div>}
                           </>
                         )}
                         {s.kind === "num" && s.n > 0 && (
@@ -306,7 +330,7 @@ export default function ReportsPage() {
                               <button key={o} onClick={() => setChartStyle((c) => ({ ...c, [q.code]: o }))} className={`mono text-[10px] uppercase px-2 h-6 rounded border ${(chartStyle[q.code] || "histogram") === o ? "bg-blue text-white border-blue" : "bg-well border-line text-muted"}`}>{o}</button>
                             ))}</div>
                             <div dangerouslySetInnerHTML={{ __html: (() => {
-                              const vals = d.subs.map((x) => Number(x?.payload?.[q.code])).filter((v) => !isNaN(v));
+                              const vals = fsubs.map((x) => Number(x?.payload?.[q.code])).filter((v) => !isNaN(v));
                               const ns = chartStyle[q.code] || "histogram";
                               const dist = Object.keys(s.dist).sort((a, b) => Number(a) - Number(b));
                               if (ns === "box") return boxPlotSVG(vals);
@@ -335,7 +359,7 @@ export default function ReportsPage() {
 
             {/* CROSS-TAB */}
             {has("crosstab") && (
-              <Section title="Cross-tabulation"><CrossTabSection questions={d.questions} subs={d.subs} /></Section>
+              <Section title="Cross-tabulation"><CrossTabSection questions={d.questions} subs={fsubs} /></Section>
             )}
 
             {/* STATISTICS */}
@@ -343,11 +367,11 @@ export default function ReportsPage() {
               <Section title="Statistical analysis">
                 <div className="text-[13px] font-bold text-ink mb-2">Descriptive statistics</div>
                 <DataTable head={["Question", "n", "Mean", "Median", "Std dev", "Min", "Max"]}
-                  rows={numQs.map((q) => { const s = summarise(q, d.subs) as any; return [q.label.slice(0, 40), String(s.n), s.mean?.toFixed(2) ?? "-", s.median?.toFixed(2) ?? "-", s.sd?.toFixed(2) ?? "-", String(s.min ?? "-"), String(s.max ?? "-")]; })} />
+                  rows={numQs.map((q) => { const s = summarise(q, fsubs) as any; return [q.label.slice(0, 40), String(s.n), s.mean?.toFixed(2) ?? "-", s.median?.toFixed(2) ?? "-", s.sd?.toFixed(2) ?? "-", String(s.min ?? "-"), String(s.max ?? "-")]; })} />
                 {numQs.length >= 2 && (
                   <div className="mt-4">
                     <div className="text-[13px] font-bold text-ink mb-2">Correlations (Pearson r)</div>
-                    <DataTable head={["Pair", "r", "n"]} rows={pairsOf(numQs).map(([a, b]) => { const c = correlation(a.code, b.code, d.subs); return [`${a.label.slice(0, 24)} x ${b.label.slice(0, 24)}`, c.r.toFixed(3), String(c.n)]; })} />
+                    <DataTable head={["Pair", "r", "n"]} rows={pairsOf(numQs).map(([a, b]) => { const c = correlation(a.code, b.code, fsubs); return [`${a.label.slice(0, 24)} x ${b.label.slice(0, 24)}`, c.r.toFixed(3), String(c.n)]; })} />
                   </div>
                 )}
               </Section>
@@ -356,7 +380,7 @@ export default function ReportsPage() {
             {/* GEOGRAPHIC */}
             {has("geographic") && (
               <Section title="Geographic analysis">
-                <DataTable head={["Region", "Responses", "%"]} rows={regionCounts(d).map((r) => [r.name, String(r.count), r.pct.toFixed(1) + "%"])} />
+                <DataTable head={["Region", "Responses", "%"]} rows={regionCounts(fd).map((r) => [r.name, String(r.count), r.pct.toFixed(1) + "%"])} />
                 <p className="text-[12px] text-muted-2 mt-3 no-print">Interactive constituency maps are added when boundary data is connected.</p>
               </Section>
             )}
@@ -444,4 +468,55 @@ function regionCounts(d: any): { name: string; count: number; pct: number }[] {
   d.subs.forEach((s: any) => { const r = regionOf(d.gidx, s.geo_unit_id) || "Unknown"; m[r] = (m[r] || 0) + 1; });
   const total = d.subs.length || 1;
   return Object.entries(m).map(([name, count]) => ({ name, count: count as number, pct: (100 * (count as number)) / total })).sort((a, b) => b.count - a.count);
+}
+
+
+/* ---------------- Filter bar ---------------- */
+function FilterBar({ d, filter, setFilter, filteredN, totalN }: { d: any; filter: FilterState; setFilter: (f: FilterState) => void; filteredN: number; totalN: number }) {
+  const regions = Array.from(new Set(d.subs.map((s: any) => regionOf(d.gidx, s.geo_unit_id)).filter(Boolean))).sort() as string[];
+  const consts = Array.from(new Set(d.subs.map((s: any) => constOf(d.gidx, s.geo_unit_id)).filter(Boolean))).sort() as string[];
+  const enumIds = Array.from(new Set(d.subs.map((s: any) => s.enumerator_id).filter(Boolean))) as string[];
+  const enumName = (id: string) => { const u = (d.users || []).find((x: any) => x.id === id); return u?.full_name || u?.email || id.slice(0, 8); };
+  // filterable categorical variables
+  const catQs = d.questions.filter((q: any) => ["single_choice", "yes_no", "true_false", "dropdown", "party_selector", "region_selector", "constituency_selector", "likert", "satisfaction", "agreement"].includes(q.type));
+  const count = activeFilterCount(filter);
+  const sel = "text-[12px] border border-line rounded-[8px] px-2 py-1.5 bg-surface focus:outline-none focus:border-blue";
+
+  const optLabel = (q: any, code: string) => { const o = (q.options || []).find((x: any) => x.code === code); return o?.label || code; };
+
+  return (
+    <div className="no-print bg-surface border border-line rounded-xl2 p-4 mb-5 max-w-[900px] mx-auto shadow-card">
+      <div className="flex items-center justify-between mb-3">
+        <div className="kicker">Filters {count > 0 && <span className="ml-1 text-blue">({count} active)</span>}</div>
+        <div className="flex items-center gap-3">
+          <span className="mono text-[11px] text-muted-2">{filteredN} of {totalN} responses</span>
+          {count > 0 && <button onClick={() => setFilter(emptyFilter())} className="mono text-[10px] uppercase px-2 h-6 rounded border border-line text-signal hover:border-signal">Clear all</button>}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Fld label="Region"><select className={sel + " w-full"} value={filter.region} onChange={(e) => setFilter({ ...filter, region: e.target.value })}><option value="">All regions</option>{regions.map((r) => <option key={r} value={r}>{r}</option>)}</select></Fld>
+        <Fld label="Constituency"><select className={sel + " w-full"} value={filter.constituency} onChange={(e) => setFilter({ ...filter, constituency: e.target.value })}><option value="">All constituencies</option>{consts.map((c) => <option key={c} value={c}>{c}</option>)}</select></Fld>
+        <Fld label="From"><input type="date" className={sel + " w-full"} value={filter.dateFrom} onChange={(e) => setFilter({ ...filter, dateFrom: e.target.value })} /></Fld>
+        <Fld label="To"><input type="date" className={sel + " w-full"} value={filter.dateTo} onChange={(e) => setFilter({ ...filter, dateTo: e.target.value })} /></Fld>
+        {enumIds.length > 1 && <Fld label="Enumerator"><select className={sel + " w-full"} value={filter.enumerator} onChange={(e) => setFilter({ ...filter, enumerator: e.target.value })}><option value="">All enumerators</option>{enumIds.map((id) => <option key={id} value={id}>{enumName(id)}</option>)}</select></Fld>}
+        {catQs.slice(0, 5).map((q: any) => (
+          <Fld key={q.code} label={q.label.slice(0, 22)}>
+            <select className={sel + " w-full"} value={filter.vars[q.code] || ""} onChange={(e) => setFilter({ ...filter, vars: { ...filter.vars, [q.code]: e.target.value } })}>
+              <option value="">All</option>
+              {(q.options || []).map((o: any) => <option key={o.code} value={o.code}>{o.label}</option>)}
+            </select>
+          </Fld>
+        ))}
+      </div>
+      {filter.drill && filter.drill.value && (
+        <div className="mt-2 flex items-center gap-2 text-[11px]">
+          <span className="mono uppercase text-muted-2">Drill-down:</span>
+          <span className="bg-blue-soft text-blue rounded-full px-2.5 py-1 mono text-[10.5px]">{filter.drill.value} <button onClick={() => setFilter({ ...filter, drill: null })} className="ml-1">x</button></span>
+        </div>
+      )}
+    </div>
+  );
+}
+function Fld({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><label className="block mono text-[8.5px] uppercase text-muted-2 mb-1 truncate">{label}</label>{children}</div>;
 }
