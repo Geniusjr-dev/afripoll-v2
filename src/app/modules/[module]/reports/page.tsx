@@ -11,6 +11,8 @@ import { summarise, hbarSVG, donutSVG, columnSVG, pieSVG, lineSVG, histogramSVG,
 import { correlation } from "@/lib/statistics";
 import { REPORT_TYPES, SECTION_LABELS, SectionKey, ALL_SECTIONS } from "@/lib/reportConfig";
 import CrossTabSection from "@/components/reports/CrossTabSection";
+import dynamic from "next/dynamic";
+const Chart3D = dynamic(() => import("@/components/reports/Chart3D"), { ssr: false, loading: () => <div className="text-muted-2 text-[12px] p-4">Loading 3D...</div> });
 import type { ExportData } from "@/lib/reportExport";
 import StudyContextBar from "@/components/StudyContextBar";
 
@@ -25,6 +27,7 @@ export default function ReportsPage() {
   const [reportType, setReportType] = useState("executive");
   const [enabled, setEnabled] = useState<Set<SectionKey>>(new Set(REPORT_TYPES.find((r) => r.key === "executive")!.sections));
   const [chartStyle, setChartStyle] = useState<Record<string, string>>({});
+  const [show3D, setShow3D] = useState<Record<string, string>>({});
   const [recommendations, setRecommendations] = useState<string[]>([""]);
   const [confidentiality, setConfidentiality] = useState("Internal");
   const [version, setVersion] = useState("1.0");
@@ -286,6 +289,14 @@ export default function ReportsPage() {
                               : style === "radar" ? radarSVG(s.rows.map((r) => r.label), s.rows.map((r) => r.count))
                               : hbarSVG(s.rows) }} />
                             <DataTable head={["Option", "Count", "%"]} rows={s.rows.map((r) => [r.label, String(r.count), r.pct.toFixed(1) + "%"])} />
+                            <div className="no-print mt-2 flex gap-1.5">
+                              {["column", "pie"].map((k) => (
+                                <button key={k} onClick={() => setShow3D((c) => ({ ...c, [q.code]: c[q.code] === k ? "" : k }))}
+                                  className={`mono text-[10px] uppercase px-2 h-6 rounded border ${show3D[q.code] === k ? "bg-ink text-white border-ink" : "bg-well border-line text-muted"}`}>3D {k}</button>
+                              ))}
+                            </div>
+                            {show3D[q.code] === "column" && <div className="mt-2 no-print"><Chart3D kind="column" title={q.label} data={{ labels: s.rows.map((r) => r.label), values: s.rows.map((r) => r.count) }} /></div>}
+                            {show3D[q.code] === "pie" && <div className="mt-2 no-print"><Chart3D kind="pie" title={q.label} data={{ labels: s.rows.map((r) => r.label), values: s.rows.map((r) => r.count) }} /></div>}
                           </>
                         )}
                         {s.kind === "num" && s.n > 0 && (
@@ -303,6 +314,14 @@ export default function ReportsPage() {
                               if (ns === "column") return columnSVG(dist, dist.map((k) => s.dist[k]));
                               return histogramSVG(vals);
                             })() }} />
+                            <div className="no-print mt-2 flex gap-1.5">
+                              <button onClick={() => setShow3D((c) => ({ ...c, [q.code]: c[q.code] === "column" ? "" : "column" }))}
+                                className={`mono text-[10px] uppercase px-2 h-6 rounded border ${show3D[q.code] === "column" ? "bg-ink text-white border-ink" : "bg-well border-line text-muted"}`}>3D column</button>
+                            </div>
+                            {show3D[q.code] === "column" && (() => {
+                              const dist = Object.keys(s.dist).sort((a, b) => Number(a) - Number(b));
+                              return <div className="mt-2 no-print"><Chart3D kind="column" title={q.label} data={{ labels: dist, values: dist.map((k) => s.dist[k]) }} /></div>;
+                            })()}
                           </>
                         )}
                         {s.kind === "text" && <div className="flex flex-col gap-1.5">{s.samples.map((t, k) => <div key={k} className="bg-well rounded-[8px] px-3 py-2 text-[12.5px]">{t}</div>)}{s.n === 0 && <span className="text-muted-2 text-[13px]">No responses.</span>}</div>}
