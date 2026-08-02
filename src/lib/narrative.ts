@@ -2,6 +2,7 @@
 // Rule-based now; structured so an AI layer can elevate it later.
 import { Question, summarise } from "./analytics";
 import { crossTab, pStars, tTest, anova, correlation } from "./statistics";
+import { classify, choiceInterpretation, ratingInterpretation } from "./questionSemantics";
 
 // ---- phrasing helpers ----
 
@@ -36,20 +37,14 @@ export function questionNarrative(q: Question, subs: any[]): string {
     const rows = [...s.rows].sort((a, b) => b.count - a.count);
     const top = rows[0];
     const second = rows[1];
+    const sem = classify(q);
+    const isAffirmative = /^(yes|true|agree|strongly agree|satisfied|very satisfied)/i.test(top.label);
     let out = `When asked "${q.label.replace(/\?$/, "")}?", ${proportionPhrase(top.pct)} of respondents (${top.count} of ${s.n}, ${pctText(top.pct)}) selected "${top.label}".`;
     if (second && second.count > 0) {
-      out += ` This was followed by "${second.label}", cited by ${pctText(second.pct)} of the sample (${second.count} respondent${second.count === 1 ? "" : "s"}).`;
+      out += ` A further ${pctText(second.pct)} (${second.count} respondent${second.count === 1 ? "" : "s"}) selected "${second.label}".`;
     }
-    // interpretation for binary yes/no
-    if (rows.length === 2 && /^(yes|no)$/i.test(top.label)) {
-      if (top.pct >= 70) out += ` This distribution ${reportVerb()} a strong tendency towards "${top.label}" within the study area, and may be regarded as a substantively meaningful pattern rather than a marginal one.`;
-      else if (top.pct >= 55) out += ` While "${top.label}" predominates, the margin is modest, and the finding should be interpreted with a degree of caution.`;
-      else out += ` The responses are relatively evenly divided, suggesting no clear consensus among respondents on this question.`;
-    } else if (top.pct >= 50) {
-      out += ` The concentration of responses around a single category ${reportVerb()} a degree of consensus among respondents on this item.`;
-    } else {
-      out += ` Responses were distributed across several categories, indicating a diversity of views rather than a dominant position.`;
-    }
+    // domain-aware interpretation
+    out += " " + choiceInterpretation(sem, top.label, top.pct, isAffirmative, s.n);
     return out;
   }
 
@@ -66,9 +61,9 @@ export function questionNarrative(q: Question, subs: any[]): string {
       : mean < mid - band ? "a generally unfavourable"
       : "a broadly neutral";
     let out = `Responses to "${q.label.replace(/\?$/, "")}" yielded a mean of ${mean.toFixed(2)} (median ${s.median.toFixed(2)}, SD ${s.sd.toFixed(2)}) on a scale ranging from ${scaleMin} to ${scaleMax}, based on ${s.n} valid response${s.n === 1 ? "" : "s"}.`;
-    out += ` The average response lies ${tone}, suggesting ${favour} assessment among respondents overall.`;
-    if (s.sd > (scaleMax - scaleMin) / 4) out += ` The relatively large standard deviation points to considerable variability in responses, and the mean is therefore best read as a summary of a fairly dispersed distribution.`;
-    else out += ` The comparatively small standard deviation indicates that responses clustered closely around the mean.`;
+    out += " " + ratingInterpretation(classify(q), mean, scaleMin, scaleMax);
+    if (s.sd > (scaleMax - scaleMin) / 4) out += ` That said, the relatively large standard deviation (${s.sd.toFixed(2)}) reveals considerable divergence of opinion beneath the average, indicating that respondents were far from unanimous.`;
+    else out += ` The comparatively small standard deviation indicates a consistent view across respondents, lending additional weight to the average as a summary measure.`;
     return out;
   }
 
