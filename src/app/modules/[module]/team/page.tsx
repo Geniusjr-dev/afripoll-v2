@@ -4,7 +4,8 @@ import { useParams, notFound } from "next/navigation";
 import { ModuleShell } from "@/components/Shell";
 import { bySlug } from "@/lib/modules";
 import { useWorkspace } from "@/lib/workspace";
-import { useTeamData, addAssignment, removeAssignment, TeamMember } from "@/lib/teamData";
+import { useTeamData, addAssignment, removeAssignment, TeamMember, Assignment } from "@/lib/teamData";
+import MemberPanel from "@/components/team/MemberPanel";
 
 const ROLE_LABEL: Record<string, string> = { super_admin: "Super Admin", org_admin: "Org Admin", project_manager: "Project Manager", supervisor: "Supervisor", enumerator: "Enumerator", data_analyst: "Data Analyst" };
 const ROLE_STYLE: Record<string, string> = {
@@ -42,7 +43,7 @@ export default function TeamPage() {
       {team.loading ? (
         <div className="text-muted mono text-[13px] py-10 text-center">Loading team...</div>
       ) : tab === "roster" ? (
-        <Roster members={team.members} canManage={canManage} userId={user?.id || ""} refresh={team.refresh} />
+        <Roster members={team.members} canManage={canManage} userId={user?.id || ""} refresh={team.refresh} assignments={team.assignments} geoName={(id: string) => team.geo.find((g: any) => g.id === id)?.name || id.slice(0, 8)} />
       ) : (
         <Assignments team={team} enumerators={enumerators} canManage={canManage} orgId={profile?.organization_id || ""} userId={user?.id || ""} slug={slug} mod={mod} />
       )}
@@ -50,8 +51,9 @@ export default function TeamPage() {
   );
 }
 
-function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]; canManage: boolean; userId: string; refresh: () => void }) {
+function Roster({ members, canManage, userId, refresh, assignments, geoName }: { members: TeamMember[]; canManage: boolean; userId: string; refresh: () => void; assignments: Assignment[]; geoName: (id: string) => string }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [viewMember, setViewMember] = useState<TeamMember | null>(null);
   const byRole = useMemo(() => {
     const order = ["super_admin", "org_admin", "project_manager", "supervisor", "data_analyst", "enumerator"];
     return [...members].sort((a, b) => (order.indexOf(a.role) - order.indexOf(b.role)) || b.responses - a.responses);
@@ -89,7 +91,7 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue to-lime-deep grid place-items-center text-white text-[12px] font-bold flex-shrink-0">{initials(m.full_name)}</span>
-                        <span className="font-semibold text-ink">{m.full_name}</span>
+                        <button onClick={() => setViewMember(m)} className="font-semibold text-ink hover:text-blue hover:underline text-left">{m.full_name}</button>
                         {!m.is_active && <span className="mono text-[9px] uppercase tracking-wide bg-[#FBEAEA] text-signal rounded-full px-2 py-0.5">Inactive</span>}
                       </div>
                     </td>
@@ -110,6 +112,7 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
         </div>
       )}
       {showAdd && <AddMemberModal userId={userId} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); refresh(); }} />}
+      {viewMember && <MemberPanel member={viewMember} assignments={assignments} geoName={geoName} onClose={() => setViewMember(null)} />}
     </>
   );
 }

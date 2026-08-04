@@ -57,3 +57,62 @@ export async function addAssignment(orgId: string, enumeratorId: string, geoUnit
 export async function removeAssignment(id: string) {
   return supabase().from("area_assignments").delete().eq("id", id);
 }
+
+// ---- single member work profile ----
+export interface MemberWork {
+  loading: boolean;
+  total: number;
+  activeDays: number;
+  avgPerDay: number;
+  avgDuration: number;      // seconds
+  flagged: number;
+  firstDate?: string;
+  lastDate?: string;
+  perDay: { day: string; count: number }[];
+  areas: { name: string; count: number }[];
+  recent: { id: string; captured_at: string; area: string; duration: number | null }[];
+}
+
+export async function loadMemberWork(memberId: string): Promise<MemberWork> {
+  const sb = supabase();
+  const [subsR, geoR, flagsR] = await Promise.all([
+    sb.from("submissions").select("client_id, captured_at, geo_unit_id, duration_seconds").eq("enumerator_id", memberId).order("captured_at", { ascending: false }),
+    sb.from("geo_units").select("id,name,level,parent_id"),
+    sb.from("submission_flags").select("submission_id"),
+  ]);
+  const subs = subsR.data || [];
+  const geo = geoR.data || [];
+  const gidx: Record<string, any> = {}; geo.forEach((g: any) => (gidx[g.id] = g));
+  const climb = (id: string, level: string): string => {
+    let cur = gidx[id]; let guard = 0;
+    while (cur && guard++ < 8) { if (cur.level === level) return cur.name; cur = cur.parent_id ? gidx[cur.parent_id] : null; }
+    return "";
+  };
+  const nameOf = (id: string) => gidx[id]?.name || climb(id, "constituency") || climb(id, "region") || "Unknown";
+
+  const days: Record<string, number> = {};
+  const areas: Record<string, number> = {};
+  const durations: number[] = [];
+  subs.forEach((s: any) => {
+    const day = (s.captured_at || "").slice(0, 10);
+    if (day) days[day] = (days[day] || 0) + 1;
+    const a = nameOf(s.geo_unit_id); areas[a] = (areas[a] || 0) + 1;
+    if (typeof s.duration_seconds === "number" && s.duration_seconds > 0) durations.push(s.duration_seconds);
+  });
+  const flagIds = new Set((flagsR.data || []).map((f: any) => f.submission_id));
+  const flagged = subs.filter((s: any) => flagIds.has(s.client_id)).length;
+  const dayList = Object.keys(days).sort();
+  const avgDuration = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+
+  return {
+    loading: false,
+    total: subs.length,
+    activeDays: dayList.length,
+    avgPerDay: dayList.length ? Math.round((subs.length / dayList.length) * 10) / 10 : 0,
+    avgDuration, flagged,
+    firstDate: dayList[0], lastDate: dayList[dayList.length - 1],
+    perDay: dayList.map((d) => ({ day: d, count: days[d] })),
+    areas: Object.entries(areas).map(([name, count]) => ({ name, count: count as number })).sort((a, b) => b.count - a.count),
+    recent: subs.slice(0, 15).map((s: any) => ({ id: s.client_id, captured_at: s.captured_at, area: nameOf(s.geo_unit_id), duration: s.duration_seconds ?? null })),
+  };
+}
