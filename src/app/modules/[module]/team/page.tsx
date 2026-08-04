@@ -75,7 +75,7 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
       {members.length === 0 ? (
         <div className="card card-accent p-10 text-center"><p className="text-muted text-[14px]">No team members found for this organisation.</p></div>
       ) : (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0" style={{ overflow: "visible" }}>
           <table className="w-full text-[13px]">
             <thead><tr className="bg-well border-b border-line">
               {["Name", "Role", "Responses collected", "Share"].map((h, i) => <th key={h} className={`py-3 px-4 mono text-[10px] uppercase tracking-wide text-muted-2 font-semibold ${i >= 2 ? "text-right" : "text-left"}`}>{h}</th>)}
@@ -116,7 +116,7 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
 
 function RowActions({ member, userId, refresh }: { member: TeamMember; userId: string; refresh: () => void }) {
   const [open, setOpen] = useState(false);
-  const [modal, setModal] = useState<"" | "role" | "delete">("");
+  const [modal, setModal] = useState<"" | "role" | "edit" | "delete">("");
   const [busy, setBusy] = useState(false);
 
   async function call(action: string, extra: any = {}) {
@@ -137,7 +137,8 @@ function RowActions({ member, userId, refresh }: { member: TeamMember; userId: s
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-9 z-50 min-w-[180px] bg-surface border border-line rounded-[10px] shadow-[0_18px_44px_-14px_rgba(11,38,71,.3)] p-1 text-left">
+          <div className="absolute right-0 top-9 z-50 min-w-[190px] bg-surface border border-line rounded-[10px] shadow-[0_18px_44px_-14px_rgba(11,38,71,.3)] p-1 text-left" style={{ maxHeight: "60vh", overflowY: "auto" }}>
+            <button onClick={() => { setOpen(false); setModal("edit"); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well">Edit name / email</button>
             <button onClick={() => { setOpen(false); setModal("role"); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well">Change role</button>
             {member.is_active
               ? <button onClick={async () => { setOpen(false); await call("active", { active: false }); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well text-gold">Deactivate</button>
@@ -146,9 +147,44 @@ function RowActions({ member, userId, refresh }: { member: TeamMember; userId: s
           </div>
         </>
       )}
+      {modal === "edit" && <EditMemberModal member={member} userId={userId} onClose={() => setModal("")} onSaved={() => { setModal(""); refresh(); }} />}
       {modal === "role" && <ChangeRoleModal member={member} onClose={() => setModal("")} onSave={async (role) => { const r = await call("role", { role }); if ((r as any).ok) setModal(""); return r; }} />}
       {modal === "delete" && <ConfirmDeleteModal member={member} onClose={() => setModal("")} onDelete={async (force) => { const r = await call("delete", { force }); if ((r as any).ok) setModal(""); return r; }} />}
     </div>
+  );
+}
+
+function EditMemberModal({ member, userId, onClose, onSaved }: { member: TeamMember; userId: string; onClose: () => void; onSaved: () => void }) {
+  const [fullName, setFullName] = useState(member.full_name === "(unnamed)" ? "" : member.full_name);
+  const [email, setEmail] = useState("");
+  const [msg, setMsg] = useState(""); const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!fullName && !email) { setMsg("Enter a name or a new email."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch("/api/team/manage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requesterId: userId, targetId: member.id, action: "edit", fullName, email: email || undefined }) });
+      const data = await res.json();
+      if (!res.ok) setMsg(data.error || "Could not update.");
+      else onSaved();
+    } catch (e: any) { setMsg("Network error: " + (e?.message || "")); }
+    setBusy(false);
+  }
+  const fld = "w-full text-[13.5px] border border-line rounded-[8px] px-3 py-2.5 focus:outline-none focus:border-blue";
+  const lbl = "block mono text-[9px] uppercase text-muted-2 mb-1.5 mt-3";
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-[18px] font-bold text-ink mb-1">Edit member</h2>
+      <p className="text-[12.5px] text-muted mb-2">Update <b>{member.full_name}</b>'s name or email.</p>
+      <label className={lbl}>Full name</label>
+      <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={fld} placeholder="Full name" />
+      <label className={lbl}>New email (optional)</label>
+      <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className={fld} placeholder="Leave blank to keep current email" />
+      {msg && <div className="text-signal text-[12.5px] mt-2">{msg}</div>}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+        <button onClick={save} className="btn btn-accent" disabled={busy}>{busy ? "Saving..." : "Save changes"}</button>
+      </div>
+    </Modal>
   );
 }
 

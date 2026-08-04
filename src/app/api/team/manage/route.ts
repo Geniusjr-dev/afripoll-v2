@@ -35,6 +35,22 @@ export async function POST(req: NextRequest) {
   if (targetId === requesterId && (action === "delete" || (action === "active" && active === false)))
     return NextResponse.json({ error: "You cannot remove or deactivate your own account." }, { status: 400 });
 
+  if (action === "edit") {
+    const { fullName, email } = body;
+    if (!fullName && !email) return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+    // update the users row name
+    if (fullName) {
+      const { error } = await admin.from("users").update({ full_name: fullName } as any).eq("id", targetId);
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    // update auth email + metadata
+    if (email) {
+      const { error: aErr } = await admin.auth.admin.updateUserById(targetId, { email, email_confirm: true, user_metadata: { full_name: fullName || undefined } } as any);
+      if (aErr) return NextResponse.json({ error: "Could not update email: " + aErr.message }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "role") {
     if (!ALLOWED_ROLES.includes(role)) return NextResponse.json({ error: "Invalid role." }, { status: 400 });
     const { error } = await admin.from("users").update({ role } as any).eq("id", targetId);
@@ -51,12 +67,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "delete") {
-    // check for collected responses; refuse silent data loss
+    // check for collected responses; warn once, then on force, unlink the data (keep responses).
     const { count } = await admin.from("submissions").select("client_id", { count: "exact", head: true }).eq("enumerator_id", targetId);
     if ((count || 0) > 0 && !body.force) {
-      return NextResponse.json({ error: `This member has collected ${count} response(s). Deactivate instead, or confirm permanent deletion.`, hasData: true, count }, { status: 409 });
+      return NextResponse.json({ error: `This member has collected ${count} response(s). On deletion their responses will be kept but no longer linked to a named collector.`, hasData: true, count }, { status: 409 });
     }
-    // delete users row then auth user
+    // unlink collected responses so the FK does not block deletion (data is preserved).
+    if ((count || 0) > 0) {
+      const { error: unlinkErr } = await admin.from("submissions").update({ enumerator_id: null } as any).eq("enumerator_id", targetId);
+      if (unlinkErr) return NextResponse.json({ error: "Could not unlink responses: " + unlinkErr.message }, { status: 400 });
+    }
     await admin.from("area_assignments").delete().eq("enumerator_id", targetId);
     const { error: rowErr } = await admin.from("users").delete().eq("id", targetId);
     if (rowErr) return NextResponse.json({ error: rowErr.message }, { status: 400 });
