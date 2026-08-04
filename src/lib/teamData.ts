@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "./supabase";
 
-export interface TeamMember { id: string; full_name: string; role: string; organization_id?: string; responses: number; }
+export interface TeamMember { id: string; full_name: string; role: string; organization_id?: string; responses: number; is_active: boolean; }
 export interface Assignment { id: string; enumerator_id: string; geo_unit_id: string; project_id: string | null; }
 export interface GeoUnit { id: string; name: string; level: string; parent_id: string | null; }
 
@@ -22,7 +22,7 @@ export function useTeamData(orgId: string | null | undefined): TeamData {
     setD((p) => ({ ...p, loading: true }));
     const sb = supabase();
     // members
-    let membersQ = sb.from("users").select("id, full_name, role, organization_id");
+    let membersQ = sb.from("users").select("id, full_name, role, organization_id, is_active");
     if (orgId) membersQ = membersQ.eq("organization_id", orgId);
     const [usersR, subsR, geoR] = await Promise.all([
       membersQ,
@@ -33,7 +33,7 @@ export function useTeamData(orgId: string | null | undefined): TeamData {
     const subs = subsR.data || [];
     const counts: Record<string, number> = {};
     subs.forEach((s: any) => { if (s.enumerator_id) counts[s.enumerator_id] = (counts[s.enumerator_id] || 0) + 1; });
-    const members: TeamMember[] = users.map((u: any) => ({ id: u.id, full_name: u.full_name || "(unnamed)", role: u.role || "enumerator", organization_id: u.organization_id, responses: counts[u.id] || 0 }));
+    const members: TeamMember[] = users.map((u: any) => ({ id: u.id, full_name: u.full_name || "(unnamed)", role: u.role || "enumerator", organization_id: u.organization_id, responses: counts[u.id] || 0, is_active: u.is_active !== false }));
 
     // assignments (table may not exist yet)
     let assignments: Assignment[] = [];

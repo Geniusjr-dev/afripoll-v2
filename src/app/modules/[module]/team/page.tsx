@@ -79,16 +79,18 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
           <table className="w-full text-[13px]">
             <thead><tr className="bg-well border-b border-line">
               {["Name", "Role", "Responses collected", "Share"].map((h, i) => <th key={h} className={`py-3 px-4 mono text-[10px] uppercase tracking-wide text-muted-2 font-semibold ${i >= 2 ? "text-right" : "text-left"}`}>{h}</th>)}
+              {canManage && <th className="py-3 px-4 mono text-[10px] uppercase tracking-wide text-muted-2 font-semibold text-right">Manage</th>}
             </tr></thead>
             <tbody>
               {byRole.map((m) => {
                 const share = totalResponses ? (100 * m.responses) / totalResponses : 0;
                 return (
-                  <tr key={m.id} className="border-b border-line-2 last:border-0">
+                  <tr key={m.id} className={`border-b border-line-2 last:border-0 ${!m.is_active ? "opacity-55" : ""}`}>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue to-lime-deep grid place-items-center text-white text-[12px] font-bold flex-shrink-0">{initials(m.full_name)}</span>
                         <span className="font-semibold text-ink">{m.full_name}</span>
+                        {!m.is_active && <span className="mono text-[9px] uppercase tracking-wide bg-[#FBEAEA] text-signal rounded-full px-2 py-0.5">Inactive</span>}
                       </div>
                     </td>
                     <td className="py-3 px-4"><span className={`mono text-[10px] uppercase tracking-wide rounded-full px-2.5 py-1 ${ROLE_STYLE[m.role] || "bg-well text-muted"}`}>{ROLE_LABEL[m.role] || m.role}</span></td>
@@ -99,6 +101,7 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
                         <span className="mono text-[11px] text-muted-2 w-10 text-right">{share.toFixed(0)}%</span>
                       </div>
                     </td>
+                    {canManage && <td className="py-3 px-4 text-right"><RowActions member={m} userId={userId} refresh={refresh} /></td>}
                   </tr>
                 );
               })}
@@ -108,6 +111,101 @@ function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]
       )}
       {showAdd && <AddMemberModal userId={userId} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); refresh(); }} />}
     </>
+  );
+}
+
+function RowActions({ member, userId, refresh }: { member: TeamMember; userId: string; refresh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [modal, setModal] = useState<"" | "role" | "delete">("");
+  const [busy, setBusy] = useState(false);
+
+  async function call(action: string, extra: any = {}) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/team/manage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requesterId: userId, targetId: member.id, action, ...extra }) });
+      const data = await res.json();
+      if (!res.ok) return data;
+      refresh();
+      return { ok: true };
+    } catch (e: any) { return { error: e?.message || "Network error" }; }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button onClick={() => setOpen((o) => !o)} className="w-8 h-8 rounded-[7px] border border-line bg-surface text-muted hover:border-blue hover:text-blue">...</button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-9 z-50 min-w-[180px] bg-surface border border-line rounded-[10px] shadow-[0_18px_44px_-14px_rgba(11,38,71,.3)] p-1 text-left">
+            <button onClick={() => { setOpen(false); setModal("role"); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well">Change role</button>
+            {member.is_active
+              ? <button onClick={async () => { setOpen(false); await call("active", { active: false }); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well text-gold">Deactivate</button>
+              : <button onClick={async () => { setOpen(false); await call("active", { active: true }); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-well text-lime-deep">Reactivate</button>}
+            <button onClick={() => { setOpen(false); setModal("delete"); }} className="block w-full text-left text-[13px] px-3 py-2 rounded-[7px] hover:bg-[#FBEAEA] text-signal">Delete permanently</button>
+          </div>
+        </>
+      )}
+      {modal === "role" && <ChangeRoleModal member={member} onClose={() => setModal("")} onSave={async (role) => { const r = await call("role", { role }); if ((r as any).ok) setModal(""); return r; }} />}
+      {modal === "delete" && <ConfirmDeleteModal member={member} onClose={() => setModal("")} onDelete={async (force) => { const r = await call("delete", { force }); if ((r as any).ok) setModal(""); return r; }} />}
+    </div>
+  );
+}
+
+function ChangeRoleModal({ member, onClose, onSave }: { member: TeamMember; onClose: () => void; onSave: (role: string) => Promise<any> }) {
+  const [role, setRole] = useState(member.role);
+  const [msg, setMsg] = useState(""); const [busy, setBusy] = useState(false);
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-[18px] font-bold text-ink mb-1">Change role</h2>
+      <p className="text-[12.5px] text-muted mb-3">Update the role for <b>{member.full_name}</b>.</p>
+      <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full text-[13.5px] border border-line rounded-[8px] px-3 py-2.5">
+        <option value="enumerator">Enumerator</option><option value="supervisor">Supervisor</option>
+        <option value="data_analyst">Data Analyst</option><option value="project_manager">Project Manager</option>
+        <option value="org_admin">Org Admin</option><option value="super_admin">Super Admin</option>
+      </select>
+      {msg && <div className="text-signal text-[12.5px] mt-2">{msg}</div>}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+        <button onClick={async () => { setBusy(true); setMsg(""); const r = await onSave(role); if (r?.error) setMsg(r.error); setBusy(false); }} className="btn btn-accent" disabled={busy}>{busy ? "Saving..." : "Save role"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ConfirmDeleteModal({ member, onClose, onDelete }: { member: TeamMember; onClose: () => void; onDelete: (force: boolean) => Promise<any> }) {
+  const [msg, setMsg] = useState(""); const [needsForce, setNeedsForce] = useState(false); const [busy, setBusy] = useState(false); const [confirm, setConfirm] = useState("");
+  async function go(force: boolean) {
+    setBusy(true); setMsg("");
+    const r = await onDelete(force);
+    if (r?.hasData) { setNeedsForce(true); setMsg(r.error); }
+    else if (r?.error) setMsg(r.error);
+    setBusy(false);
+  }
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-[18px] font-bold text-signal mb-1">Delete permanently</h2>
+      <p className="text-[13px] text-muted mb-3">This removes <b>{member.full_name}</b>'s account entirely. Consider deactivating instead, which keeps their link to collected data.</p>
+      {!needsForce ? (
+        <>
+          {msg && <div className="text-signal text-[12.5px] mb-2">{msg}</div>}
+          <div className="flex justify-end gap-2 mt-2">
+            <button onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+            <button onClick={() => go(false)} className="btn h-9 px-4 text-[13px] bg-signal text-white hover:opacity-90" disabled={busy}>{busy ? "Deleting..." : "Delete"}</button>
+          </div>
+        </>
+      ) : (
+        <div className="bg-[#FBEAEA] border border-[#f3d5cf] rounded-[10px] p-3">
+          <p className="text-[12.5px] text-signal mb-2">{msg}</p>
+          <p className="text-[12px] text-muted mb-2">Type <b className="mono">DELETE</b> to permanently remove this member and unlink their collected data.</p>
+          <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="DELETE" className="w-full text-[13px] border border-line rounded-[8px] px-3 py-2 mb-3" />
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+            <button onClick={() => go(true)} disabled={busy || confirm !== "DELETE"} className="btn h-9 px-4 text-[13px] bg-signal text-white hover:opacity-90 disabled:opacity-40">{busy ? "Deleting..." : "Confirm delete"}</button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
