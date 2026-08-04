@@ -42,7 +42,7 @@ export default function TeamPage() {
       {team.loading ? (
         <div className="text-muted mono text-[13px] py-10 text-center">Loading team...</div>
       ) : tab === "roster" ? (
-        <Roster members={team.members} />
+        <Roster members={team.members} canManage={canManage} userId={user?.id || ""} refresh={team.refresh} />
       ) : (
         <Assignments team={team} enumerators={enumerators} canManage={canManage} orgId={profile?.organization_id || ""} userId={user?.id || ""} slug={slug} mod={mod} />
       )}
@@ -50,7 +50,8 @@ export default function TeamPage() {
   );
 }
 
-function Roster({ members }: { members: TeamMember[] }) {
+function Roster({ members, canManage, userId, refresh }: { members: TeamMember[]; canManage: boolean; userId: string; refresh: () => void }) {
+  const [showAdd, setShowAdd] = useState(false);
   const byRole = useMemo(() => {
     const order = ["super_admin", "org_admin", "project_manager", "supervisor", "data_analyst", "enumerator"];
     return [...members].sort((a, b) => (order.indexOf(a.role) - order.indexOf(b.role)) || b.responses - a.responses);
@@ -59,6 +60,11 @@ function Roster({ members }: { members: TeamMember[] }) {
 
   return (
     <>
+      {canManage && (
+        <div className="flex justify-end mb-3">
+          <button onClick={() => setShowAdd(true)} className="btn btn-accent h-10 px-4">+ Add team member</button>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Kpi k="Team members" v={members.length} />
         <Kpi k="Enumerators" v={members.filter((m) => m.role === "enumerator").length} />
@@ -100,7 +106,91 @@ function Roster({ members }: { members: TeamMember[] }) {
           </table>
         </div>
       )}
+      {showAdd && <AddMemberModal userId={userId} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); refresh(); }} />}
     </>
+  );
+}
+
+function AddMemberModal({ userId, onClose, onCreated }: { userId: string; onClose: () => void; onCreated: () => void }) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("enumerator");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  function genPassword() { const s = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"; let p = ""; for (let i = 0; i < 12; i++) p += s[Math.floor(Math.random() * s.length)]; setPassword(p); }
+
+  async function submit() {
+    if (!fullName || !email || !password) { setMsg("Fill in name, email and password."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch("/api/team/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requesterId: userId, fullName, email, password, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(data.error || "Could not create member."); }
+      else { setMsg("created"); }
+    } catch (e: any) { setMsg("Network error: " + (e?.message || "")); }
+    setBusy(false);
+  }
+
+  const fld = "w-full text-[13.5px] border border-line rounded-[8px] px-3 py-2.5 focus:outline-none focus:border-blue";
+  const lbl = "block mono text-[9px] uppercase text-muted-2 mb-1.5 mt-3";
+
+  if (msg === "created") {
+    return (
+      <Modal onClose={onCreated}>
+        <div className="text-center py-4">
+          <div className="w-12 h-12 rounded-full bg-lime-soft text-lime-deep grid place-items-center mx-auto mb-3 font-bold">OK</div>
+          <h2 className="text-[18px] font-bold text-ink mb-2">Team member created</h2>
+          <p className="text-[13px] text-muted mb-4">Share these credentials securely. They can change the password after signing in.</p>
+          <div className="bg-well border border-line rounded-[10px] p-3 text-left mono text-[12px] mb-4">
+            <div><span className="text-muted-2">email:</span> {email}</div>
+            <div><span className="text-muted-2">password:</span> {password}</div>
+          </div>
+          <button onClick={onCreated} className="btn btn-accent">Done</button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-[19px] font-bold text-ink mb-1">Add team member</h2>
+      <p className="text-[12.5px] text-muted mb-2">Creates an account immediately. You share the credentials with them.</p>
+      <label className={lbl}>Full name</label>
+      <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={fld} placeholder="e.g. Ama Mensah" />
+      <label className={lbl}>Email</label>
+      <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className={fld} placeholder="name@example.com" />
+      <label className={lbl}>Temporary password</label>
+      <div className="flex gap-2">
+        <input value={password} onChange={(e) => setPassword(e.target.value)} className={fld} placeholder="at least 8 characters" />
+        <button onClick={genPassword} className="btn btn-ghost h-[42px] px-3 text-[12px] whitespace-nowrap">Generate</button>
+      </div>
+      <label className={lbl}>Role</label>
+      <select value={role} onChange={(e) => setRole(e.target.value)} className={fld}>
+        <option value="enumerator">Enumerator</option>
+        <option value="supervisor">Supervisor</option>
+        <option value="data_analyst">Data Analyst</option>
+        <option value="project_manager">Project Manager</option>
+        <option value="org_admin">Org Admin</option>
+      </select>
+      {msg && msg !== "created" && <div className="text-signal text-[12.5px] mt-3">{msg}</div>}
+      <div className="flex justify-end gap-2 mt-5">
+        <button onClick={onClose} className="btn btn-ghost" disabled={busy}>Cancel</button>
+        <button onClick={submit} className="btn btn-accent" disabled={busy}>{busy ? "Creating..." : "Create member"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
+      <div className="bg-surface rounded-[16px] p-6 max-w-[440px] w-full shadow-[0_30px_70px_-20px_rgba(11,38,71,.5)]" onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>
   );
 }
 
