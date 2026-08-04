@@ -6,10 +6,10 @@ import { bySlug } from "@/lib/modules";
 import { useWorkspace } from "@/lib/workspace";
 import { useTeamData, addAssignment, removeAssignment, TeamMember } from "@/lib/teamData";
 
-const ROLE_LABEL: Record<string, string> = { admin: "Administrator", owner: "Owner", supervisor: "Supervisor", enumerator: "Enumerator", analyst: "Analyst" };
+const ROLE_LABEL: Record<string, string> = { super_admin: "Super Admin", org_admin: "Org Admin", project_manager: "Project Manager", supervisor: "Supervisor", enumerator: "Enumerator", data_analyst: "Data Analyst" };
 const ROLE_STYLE: Record<string, string> = {
-  admin: "bg-blue-soft text-blue", owner: "bg-blue-soft text-blue", supervisor: "bg-[#EEF6E2] text-lime-deep",
-  enumerator: "bg-well text-muted", analyst: "bg-[#F3EEFA] text-[#6a4c93]",
+  super_admin: "bg-blue-soft text-blue", org_admin: "bg-blue-soft text-blue", project_manager: "bg-[#F3EEFA] text-[#6a4c93]",
+  supervisor: "bg-[#EEF6E2] text-lime-deep", enumerator: "bg-well text-muted", data_analyst: "bg-[#FBF0E4] text-[#B26A00]",
 };
 
 export default function TeamPage() {
@@ -19,7 +19,7 @@ export default function TeamPage() {
   const team = useTeamData(profile?.organization_id);
   const [tab, setTab] = useState<"roster" | "assignments">("roster");
 
-  const canManage = ["admin", "owner", "supervisor"].includes(profile?.role || "");
+  const canManage = ["super_admin", "org_admin", "project_manager", "supervisor"].includes(profile?.role || "");
 
   if (!mod) return notFound();
 
@@ -52,7 +52,7 @@ export default function TeamPage() {
 
 function Roster({ members }: { members: TeamMember[] }) {
   const byRole = useMemo(() => {
-    const order = ["owner", "admin", "supervisor", "analyst", "enumerator"];
+    const order = ["super_admin", "org_admin", "project_manager", "supervisor", "data_analyst", "enumerator"];
     return [...members].sort((a, b) => (order.indexOf(a.role) - order.indexOf(b.role)) || b.responses - a.responses);
   }, [members]);
   const totalResponses = members.reduce((a, m) => a + m.responses, 0);
@@ -62,7 +62,7 @@ function Roster({ members }: { members: TeamMember[] }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Kpi k="Team members" v={members.length} />
         <Kpi k="Enumerators" v={members.filter((m) => m.role === "enumerator").length} />
-        <Kpi k="Supervisors" v={members.filter((m) => ["supervisor", "admin", "owner"].includes(m.role)).length} />
+        <Kpi k="Supervisors" v={members.filter((m) => ["supervisor", "super_admin", "org_admin", "project_manager"].includes(m.role)).length} />
         <Kpi k="Responses collected" v={totalResponses} />
       </div>
 
