@@ -31,6 +31,8 @@ export default function CollectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState("");
   const [done, setDone] = useState(false);
+  const [restricted, setRestricted] = useState(false);              // true when an enumerator has assignments limiting them
+  const [allowedGeoIds, setAllowedGeoIds] = useState<Set<string> | null>(null); // geo unit ids the user may collect in (null = unrestricted)
   const startedAt = useRef<number>(Date.now());
 
   const studies = mod ? projects.filter((p) => p.project_type === mod.type) : [];
@@ -62,6 +64,37 @@ export default function CollectPage() {
       const g = geo || [];
       setRegions(g.filter((x: any) => x.level === "region"));
       setConstituencies(g.filter((x: any) => x.level === "constituency"));
+
+      // Enforce area assignments: supervisors/admins see all; enumerators see only assigned areas.
+      const MANAGER = ["super_admin", "org_admin", "project_manager", "supervisor"];
+      const isManager = MANAGER.includes(profile?.role || "");
+      if (!isManager && user?.id) {
+        try {
+          const { data: mine } = await sb.from("area_assignments").select("geo_unit_id, project_id").eq("enumerator_id", user.id);
+          const rows = mine || [];
+          // assignments that apply to this study (project-specific) or to any (project_id null)
+          const applicable = rows.filter((a: any) => !a.project_id || a.project_id === activeStudyId);
+          if (applicable.length > 0) {
+            // build the allowed set: each assigned geo unit, plus its child constituencies (if a region was assigned)
+            const gidx: Record<string, any> = {}; g.forEach((x: any) => (gidx[x.id] = x));
+            const allowed = new Set<string>();
+            applicable.forEach((a: any) => {
+              allowed.add(a.geo_unit_id);
+              // if a region is assigned, include its constituencies
+              g.forEach((x: any) => { if (x.level === "constituency" && x.parent_id === a.geo_unit_id) allowed.add(x.id); });
+              // if a constituency is assigned, include its parent region so the region shows in the picker
+              const unit = gidx[a.geo_unit_id];
+              if (unit && unit.level === "constituency" && unit.parent_id) allowed.add(unit.parent_id);
+            });
+            setAllowedGeoIds(allowed);
+            setRestricted(true);
+          } else {
+            setAllowedGeoIds(null);
+            setRestricted(false);
+          }
+        } catch { setAllowedGeoIds(null); setRestricted(false); }
+      } else { setAllowedGeoIds(null); setRestricted(false); }
+
       startedAt.current = Date.now();
       setLoading(false);
     })();
@@ -103,6 +136,11 @@ export default function CollectPage() {
   async function submit() {
     const err = validatePage(); if (err) { setMsg(err); return; }
     if (!geoUnitId && !regionId) { setMsg("Select at least a region for this interview."); return; }
+    if (restricted && allowedGeoIds) {
+      if (allowedGeoIds.size === 0) { setMsg("You have no assigned areas. Contact your supervisor before submitting."); return; }
+      const chosen = geoUnitId || regionId;
+      if (chosen && !allowedGeoIds.has(chosen)) { setMsg("The selected area is outside your assigned areas."); return; }
+    }
     setSubmitting(true); setMsg("");
     try {
       const sb = supabase();
@@ -140,7 +178,8 @@ export default function CollectPage() {
     );
   }
 
-  const constForRegion = constituencies.filter((c) => !regionId || c.parent_id === regionId);
+  const visibleRegions = allowedGeoIds ? regions.filter((r) => allowedGeoIds.has(r.id)) : regions;
+  const constForRegion = constituencies.filter((c) => (!regionId || c.parent_id === regionId) && (!allowedGeoIds || allowedGeoIds.has(c.id)));
 
   return (
     <ModuleShell slug={slug} title={`${mod.label} - Collect`}>
@@ -185,12 +224,18 @@ export default function CollectPage() {
             {page === 0 && (
               <div className="card p-5 mb-4">
                 <div className="kicker mb-3">Interview location</div>
+                {restricted && visibleRegions.length > 0 && (
+                  <div className="bg-blue-soft text-blue text-[12px] rounded-[9px] px-3 py-2 mb-3">You are assigned to specific areas. Only your assigned areas are shown below.</div>
+                )}
+                {restricted && visibleRegions.length === 0 ? (
+                  <div className="bg-[#FBEAEA] text-signal text-[13px] rounded-[9px] px-3 py-3">You have no areas assigned for this study yet. Please contact your supervisor to be assigned a collection area before you can submit responses.</div>
+                ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block mono text-[9px] uppercase text-muted-2 mb-1.5">Region</label>
                     <select className="w-full text-[14px] border border-line rounded-[9px] px-3 py-2.5" value={regionId} onChange={(e) => { setRegionId(e.target.value); setGeoUnitId(""); }}>
                       <option value="">Select region...</option>
-                      {regions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      {visibleRegions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
                   <div>
@@ -201,6 +246,7 @@ export default function CollectPage() {
                     </select>
                   </div>
                 </div>
+                )}
               </div>
             )}
 
