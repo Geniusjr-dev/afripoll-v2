@@ -41,9 +41,9 @@ function UserFooter() {
   );
 }
 
-function Row({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function Row({ href, active, children, onNavigate }: { href: string; active: boolean; children: React.ReactNode; onNavigate?: () => void }) {
   return (
-    <Link href={href}
+    <Link href={href} onClick={onNavigate}
       className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14.5px] font-medium mb-0.5 transition
         ${active ? "bg-sidebar-active text-white shadow-[inset_3px_0_0_#8DC63F]" : "text-[#EAF1FA] hover:bg-sidebar-hover"}`}>
       {children}
@@ -52,10 +52,12 @@ function Row({ href, active, children }: { href: string; active: boolean; childr
 }
 
 /** Organisation workspace sidebar (management only; no Builder/Collect). */
-export function OrgSidebar() {
+export function OrgSidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const path = usePathname();
   return (
-    <aside className="fixed top-0 left-0 bottom-0 w-64 bg-sidebar text-[#EAF1FA] flex flex-col z-40 border-r border-white/[.06]">
+    <>
+      {open && <div className="fixed inset-0 bg-ink/50 z-40 md:hidden" onClick={onClose} />}
+    <aside className={`fixed top-0 left-0 bottom-0 w-64 bg-sidebar text-[#EAF1FA] flex flex-col z-50 border-r border-white/[.06] transition-transform duration-200 md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
       <Brand />
       <div className="px-3.5 pb-2">
         <div className="w-full flex items-center gap-2.5 bg-sidebar-hover border border-white/10 rounded-[10px] px-3 py-2.5">
@@ -71,11 +73,11 @@ export function OrgSidebar() {
         {ORG_NAV.map((n) => {
           const href = n.seg ? `/${n.seg}` : "/";
           const active = n.seg ? path.startsWith(`/${n.seg}`) : path === "/";
-          return <Row key={n.key} href={href} active={active}>{n.label}</Row>;
+          return <Row key={n.key} href={href} active={active} onNavigate={onClose}>{n.label}</Row>;
         })}
         <div className="mono text-[9px] tracking-[.11em] uppercase text-[#9FB6D2] px-2.5 pt-3.5 pb-1.5">Research modules</div>
         {MODULES.map((m) => (
-          <Row key={m.slug} href={`/modules/${m.slug}`} active={path.startsWith(`/modules/${m.slug}`)}>
+          <Row key={m.slug} href={`/modules/${m.slug}`} active={path.startsWith(`/modules/${m.slug}`)} onNavigate={onClose}>
             <span className="min-w-[26px] h-[22px] px-1 rounded-[6px] grid place-items-center font-display font-bold text-[10px] bg-white/10">{m.short}</span>
             {m.label}
           </Row>
@@ -83,17 +85,20 @@ export function OrgSidebar() {
       </nav>
       <UserFooter />
     </aside>
+    </>
   );
 }
 
 /** Module workspace sidebar (identical pattern for all six). */
-export function ModuleSidebar({ slug }: { slug: string }) {
+export function ModuleSidebar({ slug, open = false, onClose }: { slug: string; open?: boolean; onClose?: () => void }) {
   const path = usePathname();
   const mod = bySlug(slug);
   if (!mod) return null;
   const base = `/modules/${slug}`;
   return (
-    <aside className="fixed top-0 left-0 bottom-0 w-64 bg-sidebar text-[#EAF1FA] flex flex-col z-40 border-r border-white/[.06]">
+    <>
+      {open && <div className="fixed inset-0 bg-ink/50 z-40 md:hidden" onClick={onClose} />}
+    <aside className={`fixed top-0 left-0 bottom-0 w-64 bg-sidebar text-[#EAF1FA] flex flex-col z-50 border-r border-white/[.06] transition-transform duration-200 md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
       <Brand />
       <div className="px-3.5 pb-2">
         <Link href="/" className="block text-[11px] text-[#9FB6D2] mono px-2.5 py-1 hover:text-white">&larr; Organisation</Link>
@@ -111,10 +116,11 @@ export function ModuleSidebar({ slug }: { slug: string }) {
         {MODULE_NAV.map((n) => {
           const href = n.seg ? `${base}/${n.seg}` : base;
           const active = n.seg ? path.startsWith(`${base}/${n.seg}`) : path === base;
-          return <Row key={n.key} href={href} active={active}>{n.label}</Row>;
+          return <Row key={n.key} href={href} active={active} onNavigate={onClose}>{n.label}</Row>;
         })}
       </nav>
       <UserFooter />
     </aside>
+    </>
   );
 }
