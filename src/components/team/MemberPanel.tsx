@@ -4,17 +4,17 @@ import { TeamMember, loadMemberWork, MemberWork, Assignment } from "@/lib/teamDa
 
 const ROLE_LABEL: Record<string, string> = { super_admin: "Super Admin", org_admin: "Org Admin", project_manager: "Project Manager", supervisor: "Supervisor", enumerator: "Enumerator", data_analyst: "Data Analyst" };
 
-export default function MemberPanel({ member, assignments, geoName, onClose }: {
-  member: TeamMember; assignments: Assignment[]; geoName: (id: string) => string; onClose: () => void;
+export default function MemberPanel({ member, assignments, geoName, projectType, orgId, onClose }: {
+  member: TeamMember; assignments: Assignment[]; geoName: (id: string) => string; projectType?: string; orgId?: string | null; onClose: () => void;
 }) {
   const [work, setWork] = useState<MemberWork | null>(null);
 
   useEffect(() => {
     let live = true;
     setWork(null);
-    loadMemberWork(member.id).then((w) => { if (live) setWork(w); });
+    loadMemberWork(member.id, projectType, orgId).then((w) => { if (live) setWork(w); });
     return () => { live = false; };
-  }, [member.id]);
+  }, [member.id, projectType, orgId]);
 
   const myAssignments = assignments.filter((a) => a.enumerator_id === member.id);
   const maxDay = work ? Math.max(1, ...work.perDay.map((d) => d.count)) : 1;

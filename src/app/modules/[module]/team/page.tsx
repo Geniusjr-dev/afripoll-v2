@@ -17,7 +17,7 @@ export default function TeamPage() {
   const slug = String(useParams().module);
   const mod = bySlug(slug);
   const { user, profile } = useWorkspace();
-  const team = useTeamData(profile?.organization_id);
+  const team = useTeamData(profile?.organization_id, mod?.type);
   const [tab, setTab] = useState<"roster" | "assignments">("roster");
 
   const canManage = ["super_admin", "org_admin", "project_manager", "supervisor"].includes(profile?.role || "");
@@ -43,7 +43,7 @@ export default function TeamPage() {
       {team.loading ? (
         <div className="text-muted mono text-[13px] py-10 text-center">Loading team...</div>
       ) : tab === "roster" ? (
-        <Roster members={team.members} canManage={canManage} userId={user?.id || ""} refresh={team.refresh} assignments={team.assignments} geoName={(id: string) => team.geo.find((g: any) => g.id === id)?.name || id.slice(0, 8)} />
+        <Roster members={team.members} canManage={canManage} userId={user?.id || ""} refresh={team.refresh} assignments={team.assignments} geoName={(id: string) => team.geo.find((g: any) => g.id === id)?.name || id.slice(0, 8)} projectType={mod.type} orgId={profile?.organization_id} />
       ) : (
         <Assignments team={team} enumerators={enumerators} canManage={canManage} orgId={profile?.organization_id || ""} userId={user?.id || ""} slug={slug} mod={mod} />
       )}
@@ -51,7 +51,7 @@ export default function TeamPage() {
   );
 }
 
-function Roster({ members, canManage, userId, refresh, assignments, geoName }: { members: TeamMember[]; canManage: boolean; userId: string; refresh: () => void; assignments: Assignment[]; geoName: (id: string) => string }) {
+function Roster({ members, canManage, userId, refresh, assignments, geoName, projectType, orgId }: { members: TeamMember[]; canManage: boolean; userId: string; refresh: () => void; assignments: Assignment[]; geoName: (id: string) => string; projectType: string; orgId?: string | null }) {
   const [showAdd, setShowAdd] = useState(false);
   const [viewMember, setViewMember] = useState<TeamMember | null>(null);
   const byRole = useMemo(() => {
@@ -112,7 +112,7 @@ function Roster({ members, canManage, userId, refresh, assignments, geoName }: {
         </div>
       )}
       {showAdd && <AddMemberModal userId={userId} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); refresh(); }} />}
-      {viewMember && <MemberPanel member={viewMember} assignments={assignments} geoName={geoName} onClose={() => setViewMember(null)} />}
+      {viewMember && <MemberPanel member={viewMember} assignments={assignments} geoName={geoName} projectType={projectType} orgId={orgId} onClose={() => setViewMember(null)} />}
     </>
   );
 }

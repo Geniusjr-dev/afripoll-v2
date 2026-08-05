@@ -15,7 +15,7 @@ export interface TeamData {
   refresh: () => void;
 }
 
-export function useTeamData(orgId: string | null | undefined): TeamData {
+export function useTeamData(orgId: string | null | undefined, projectType?: string): TeamData {
   const [d, setD] = useState<TeamData>({ loading: true, members: [], assignments: [], geo: [], assignmentsAvailable: true, refresh: () => {} });
 
   const load = useCallback(async () => {
@@ -24,9 +24,26 @@ export function useTeamData(orgId: string | null | undefined): TeamData {
     // members
     let membersQ = sb.from("users").select("id, full_name, role, organization_id, is_active");
     if (orgId) membersQ = membersQ.eq("organization_id", orgId);
+
+    // Resolve the project ids that belong to the current module (by project_type).
+    let moduleProjectIds: string[] | null = null;
+    if (projectType) {
+      let projQ = sb.from("projects").select("id").eq("project_type", projectType);
+      if (orgId) projQ = projQ.eq("organization_id", orgId);
+      const projR = await projQ;
+      moduleProjectIds = (projR.data || []).map((p: any) => p.id);
+    }
+
+    // Count submissions, scoped to this module's projects when we have them.
+    let subsQ = sb.from("submissions").select("enumerator_id, project_id");
+    if (moduleProjectIds !== null) {
+      if (moduleProjectIds.length === 0) subsQ = subsQ.eq("project_id", "00000000-0000-0000-0000-000000000000"); // no projects -> no rows
+      else subsQ = subsQ.in("project_id", moduleProjectIds);
+    }
+
     const [usersR, subsR, geoR] = await Promise.all([
       membersQ,
-      sb.from("submissions").select("enumerator_id"),
+      subsQ,
       sb.from("geo_units").select("id,name,level,parent_id").in("level", ["region", "constituency"]).order("name"),
     ]);
     const users = usersR.data || [];
@@ -73,10 +90,23 @@ export interface MemberWork {
   recent: { id: string; captured_at: string; area: string; duration: number | null }[];
 }
 
-export async function loadMemberWork(memberId: string): Promise<MemberWork> {
+export async function loadMemberWork(memberId: string, projectType?: string, orgId?: string | null): Promise<MemberWork> {
   const sb = supabase();
+  // scope to this module's projects when a project_type is given
+  let moduleProjectIds: string[] | null = null;
+  if (projectType) {
+    let projQ = sb.from("projects").select("id").eq("project_type", projectType);
+    if (orgId) projQ = projQ.eq("organization_id", orgId);
+    const projR = await projQ;
+    moduleProjectIds = (projR.data || []).map((p: any) => p.id);
+  }
+  let subsQ = sb.from("submissions").select("client_id, captured_at, geo_unit_id, duration_seconds").eq("enumerator_id", memberId).order("captured_at", { ascending: false });
+  if (moduleProjectIds !== null) {
+    if (moduleProjectIds.length === 0) subsQ = subsQ.eq("project_id", "00000000-0000-0000-0000-000000000000");
+    else subsQ = subsQ.in("project_id", moduleProjectIds);
+  }
   const [subsR, geoR, flagsR] = await Promise.all([
-    sb.from("submissions").select("client_id, captured_at, geo_unit_id, duration_seconds").eq("enumerator_id", memberId).order("captured_at", { ascending: false }),
+    subsQ,
     sb.from("geo_units").select("id,name,level,parent_id"),
     sb.from("submission_flags").select("submission_id"),
   ]);
